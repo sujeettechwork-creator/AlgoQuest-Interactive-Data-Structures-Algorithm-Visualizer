@@ -14,6 +14,7 @@ static char input[32] = "";
 static int inputLength = 0;
 static int inputActive = 0;
 static int returnDashboard = 0;
+static int viewStart = 0;   // index of the first node currently shown
 static char message[100] = "Circular Linked List Ready";
 
 static Color UI_BG = {15, 23, 42, 255};
@@ -22,6 +23,11 @@ static Color UI_CYAN = {34, 211, 238, 255};
 static Color UI_GREEN = {74, 222, 128, 255};
 static Color UI_RED = {248, 113, 113, 255};
 static Color UI_WHITE = {241, 245, 249, 255};
+static Color UI_DISABLED = {71, 85, 105, 255};
+
+// Rectangles for the view controls
+static const Rectangle prevButton = {800, 375, 130, 40};
+static const Rectangle nextButton = {950, 375, 130, 40};
 
 static void SetMessage(const char *msg)
 {
@@ -51,6 +57,19 @@ static int Clicked(Rectangle r)
            CheckCollisionPointRec(GetMousePosition(), r);
 }
 
+static int MaxViewStart(void)
+{
+    int m = list.size - DISPLAY_LIMIT;
+    return m > 0 ? m : 0;
+}
+
+static void ClampView(void)
+{
+    int maxStart = MaxViewStart();
+    if (viewStart > maxStart) viewStart = maxStart;
+    if (viewStart < 0) viewStart = 0;
+}
+
 static void DrawButton(Rectangle r, const char *label, Color color)
 {
     int hover = CheckCollisionPointRec(GetMousePosition(), r);
@@ -62,7 +81,7 @@ static void DrawButton(Rectangle r, const char *label, Color color)
     DrawText(label,
              (int)(r.x + r.width / 2 -
                    MeasureText(label, 17) / 2),
-             (int)(r.y + 14), 17, UI_WHITE);
+             (int)(r.y + (r.height - 17) / 2), 17, UI_WHITE);
 }
 
 void CLLVisualizerInit(void)
@@ -72,6 +91,7 @@ void CLLVisualizerInit(void)
 
     ClearInput();
     returnDashboard = 0;
+    viewStart = 0;
     SetMessage("Circular Linked List Ready.");
 }
 
@@ -139,6 +159,7 @@ void CLLVisualizerUpdate(void)
             SetMessage(CLLInsertFront(&list, value)
                        ? "Inserted at front."
                        : "Memory allocation failed.");
+            viewStart = 0;   // show the new head
             ClearInput();
         }
         else SetMessage("Enter a valid integer.");
@@ -151,6 +172,7 @@ void CLLVisualizerUpdate(void)
             SetMessage(CLLInsertEnd(&list, value)
                        ? "Inserted at end."
                        : "Memory allocation failed.");
+            viewStart = MaxViewStart();   // jump to show the new tail
             ClearInput();
         }
         else SetMessage("Enter a valid integer.");
@@ -163,6 +185,8 @@ void CLLVisualizerUpdate(void)
             SetMessage(CLLInsertAt(&list, list.size / 2, value)
                        ? "Inserted at middle."
                        : "Insertion failed.");
+            // center the view on the middle of the list
+            viewStart = list.size / 2 - DISPLAY_LIMIT / 2;
             ClearInput();
         }
         else SetMessage("Enter a valid integer.");
@@ -187,8 +211,14 @@ void CLLVisualizerUpdate(void)
             int position = CLLSearch(&list, value);
 
             if (position >= 0)
+            {
                 snprintf(message, sizeof(message),
                          "Found %d at position %d.", value, position);
+                // scroll so the found node is visible
+                if (position < viewStart ||
+                    position >= viewStart + DISPLAY_LIMIT)
+                    viewStart = position - DISPLAY_LIMIT / 2;
+            }
             else
                 SetMessage("Value not found.");
         }
@@ -198,15 +228,34 @@ void CLLVisualizerUpdate(void)
     if (Clicked(reverse))
     {
         CLLReverse(&list);
+        viewStart = 0;
         SetMessage("Circular list reversed.");
     }
 
     if (Clicked(clear))
     {
         CLLClear(&list);
-        SetMessage("Circular list cleaUI_RED.");
+        viewStart = 0;
+        SetMessage("Circular list cleared.");
         ClearInput();
     }
+
+    // ---- View controls: buttons, arrow keys, mouse wheel ----
+    if (Clicked(prevButton) || IsKeyPressed(KEY_LEFT))
+        viewStart -= 1;
+
+    if (Clicked(nextButton) || IsKeyPressed(KEY_RIGHT))
+        viewStart += 1;
+
+    Vector2 mouse = GetMousePosition();
+    if (mouse.y > 370 && mouse.y < 600)
+    {
+        float wheel = GetMouseWheelMove();
+        if (wheel > 0) viewStart -= 1;
+        if (wheel < 0) viewStart += 1;
+    }
+
+    ClampView();
 }
 
 int CLLVisualizerWantsDashboard(void)
@@ -262,18 +311,31 @@ void CLLVisualizerDraw(void)
     DrawText("CIRCULAR STRUCTURE",
              60, 390, 22, UI_CYAN);
 
+    // PREV / NEXT controls (grey when there is nothing to scroll to)
+    DrawButton(prevButton, "< PREV",
+               viewStart > 0 ? (Color){59, 130, 246, 255} : UI_DISABLED);
+    DrawButton(nextButton, "NEXT >",
+               viewStart < MaxViewStart() ? (Color){59, 130, 246, 255}
+                                          : UI_DISABLED);
+
     if (list.size == 0)
     {
         DrawText("EMPTY LIST", 180, 485, 24, UI_RED);
     }
     else
     {
+        // Walk to the first visible node
         CNode *current = list.tail->next;
+        for (int i = 0; i < viewStart; i++)
+            current = current->next;
+
         int x = 180;
         int count = 0;
 
-        while (count < list.size && count < DISPLAY_LIMIT)
+        while (count < DISPLAY_LIMIT && viewStart + count < list.size)
         {
+            int index = viewStart + count;
+
             DrawRectangleRounded(
                 (Rectangle){x, 465, 105, 65},
                 0.12f, 8, UI_PANEL);
@@ -286,10 +348,15 @@ void CLLVisualizerDraw(void)
             snprintf(number, sizeof(number), "%d",
                      current->data);
 
-            DrawText(number, x + 38, 486, 22, UI_WHITE);
+            DrawText(number,
+                     x + 52 - MeasureText(number, 22) / 2,
+                     486, 22, UI_WHITE);
 
-            if (count < DISPLAY_LIMIT - 1 &&
-                count < list.size - 1)
+            // index label under each node
+            DrawText(TextFormat("[%d]", index), x + 38, 536, 14, UI_WHITE);
+
+            // arrow to the next node (only if a next node exists in the list)
+            if (count < DISPLAY_LIMIT - 1 && index < list.size - 1)
             {
                 DrawLineEx(
                     (Vector2){x + 105, 497},
@@ -308,16 +375,28 @@ void CLLVisualizerDraw(void)
             count++;
         }
 
-        DrawText("TAIL -> HEAD (CIRCULAR LINK)",
-                 180, 555, 18, UI_GREEN);
+        int lastShown = viewStart + count;   // one past the last visible index
 
-        if (list.size > DISPLAY_LIMIT)
-            DrawText("More nodes exist than currently displayed.",
-                     180, 580, 15, UI_WHITE);
+        // Hints that more nodes exist off-screen
+        if (viewStart > 0)
+            DrawText("<", 150, 485, 28, UI_CYAN);
+        if (lastShown < list.size)
+            DrawText(">", 1150, 485, 28, UI_CYAN);
+
+        if (lastShown == list.size)
+            DrawText("TAIL -> HEAD (CIRCULAR LINK)",
+                     180, 560, 18, UI_GREEN);
+        else
+            DrawText("Use PREV / NEXT, Left/Right keys or mouse wheel to see other nodes.",
+                     180, 560, 16, UI_WHITE);
+
+        DrawText(TextFormat("Showing nodes %d-%d of %d",
+                            viewStart + 1, lastShown, list.size),
+                 180, 585, 16, UI_CYAN);
     }
 
     DrawText(TextFormat("Total Nodes: %d", list.size),
-             60, 625, 18, UI_WHITE);
+             60, 635, 18, UI_WHITE);
 
-    DrawText(message, 400, 625, 18, YELLOW);
+    DrawText(message, 400, 635, 18, YELLOW);
 }
