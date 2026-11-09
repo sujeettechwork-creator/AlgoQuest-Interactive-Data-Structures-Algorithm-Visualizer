@@ -4,6 +4,7 @@
 #include "graphics/linked_list_visualizer.h"
 #include "graphics/doubly_linked_list_visualizer.h"
 #include "graphics/circular_linked_list_visualizer.h"
+#include "graphics/binary_tree_visualizer.h"
 
 #define SCREEN_WIDTH 1200
 #define SCREEN_HEIGHT 750
@@ -40,15 +41,13 @@ static const char *modules[] = {
     "Linked List Visualizer",
     "Doubly Linked List Visualizer",
     "Circular Linked List",
-    "Tree Visualizer",
+    "Binary Search Tree Visualizer",
     "Graph Algorithms",
-    "AlgoQuest Challenge"
-};
+    "AlgoQuest Challenge"};
 #define MODULE_COUNT 10
 
 // 1 = visualizer was made for full 1200px width -> scale it to fit beside the sidebar
 // 0 = draw normally (already leaves room for the sidebar)
-// If any module looks wrong, just flip its value here.
 static const int moduleNeedsFit[MODULE_COUNT] = {
     0, // Dashboard
     0, // Sorting
@@ -57,8 +56,8 @@ static const int moduleNeedsFit[MODULE_COUNT] = {
     0, // Linked List (already looks correct)
     1, // Doubly Linked List
     1, // Circular Linked List
-    0, 0, 0
-};
+    1, // Binary Search Tree Visualizer (Fixed to fit beside sidebar)
+    0, 0};
 
 static void ResetMouseMapping(void)
 {
@@ -111,9 +110,9 @@ static void DrawDashboard(void)
     const char *titles[] = {"SORTING", "STACK", "QUEUE",
                             "LINKED LIST", "DOUBLY LINKED", "CIRCULAR LIST"};
     const char *descriptions[] = {"Visualize sorting algorithms",
-                                  "Practice PUSH, POP and PEEK", "Explore ENQUEUE and DEQUEUE",
-                                  "Understand node connections", "Explore bidirectional links",
-                                  "Explore circular node loops"};
+                                 "Practice PUSH, POP and PEEK", "Explore ENQUEUE and DEQUEUE",
+                                 "Understand node connections", "Explore bidirectional links",
+                                 "Explore circular node loops"};
     Color accents[] = {UI_CYAN, UI_PURPLE, UI_CYAN, UI_PURPLE, UI_CYAN, UI_PURPLE};
 
     Vector2 mousePos = GetMousePosition();
@@ -125,7 +124,7 @@ static void DrawDashboard(void)
         Rectangle card = {285 + col * 290, 145 + row * 215, 265, 180};
         int hover = CheckCollisionPointRec(mousePos, card);
         DrawRectangleRounded(card, 0.12f, 8,
-                             hover ? (Color){39, 48, 72, 255} : UI_CARD);
+                            hover ? (Color){39, 48, 72, 255} : UI_CARD);
         DrawRectangle((int)card.x, (int)card.y, 265, 5, accents[i]);
         DrawText(titles[i], (int)card.x + 18, (int)card.y + 30, 18, accents[i]);
         DrawText(descriptions[i], (int)card.x + 18, (int)card.y + 75, 13, UI_WHITE);
@@ -147,8 +146,6 @@ int main(void)
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "AlgoQuest - Data Structures Visualizer");
     SetTargetFPS(60);
 
-    // Visualizers use ESC to go back to the dashboard, so ESC must not close the window.
-    // The window close (X) button still works.
     SetExitKey(KEY_NULL);
 
     StackVisualizerInit();
@@ -156,46 +153,55 @@ int main(void)
     LinkedListVisualizerInit();
     DLLVisualizerInit();
     CLLVisualizerInit();
+    BSTVisualizerInit();
 
     while (!WindowShouldClose())
     {
-        // --- UPDATE LOGIC ---
-        // Mouse is mapped into the visualizer's own coordinate space while it updates
-        if (moduleNeedsFit[selectedModule]) ApplyFitMouseMapping();
-        else ResetMouseMapping();
+        if (moduleNeedsFit[selectedModule])
+            ApplyFitMouseMapping();
+        else
+            ResetMouseMapping();
 
         if (selectedModule == 2)
         {
             StackVisualizerUpdate();
-            if (StackVisualizerWantsDashboard()) selectedModule = 0;
+            if (StackVisualizerWantsDashboard())
+                selectedModule = 0;
         }
         else if (selectedModule == 3)
         {
             QueueVisualizerUpdate();
-            if (QueueVisualizerWantsDashboard()) selectedModule = 0;
+            if (QueueVisualizerWantsDashboard())
+                selectedModule = 0;
         }
         else if (selectedModule == 4)
         {
             LinkedListVisualizerUpdate();
-            if (LinkedListVisualizerWantsDashboard()) selectedModule = 0;
+            if (LinkedListVisualizerWantsDashboard())
+                selectedModule = 0;
         }
         else if (selectedModule == 5)
         {
             DLLVisualizerUpdate();
-            if (DLLVisualizerWantsDashboard()) selectedModule = 0;
+            if (DLLVisualizerWantsDashboard())
+                selectedModule = 0;
         }
         else if (selectedModule == 6)
         {
             CLLVisualizerUpdate();
-            if (CLLVisualizerWantsDashboard()) selectedModule = 0;
+            if (CLLVisualizerWantsDashboard())
+                selectedModule = 0;
+        }
+        else if (selectedModule == 7)
+        {
+            BSTVisualizerUpdate();
+            if (BSTVisualizerWantsDashboard())
+                selectedModule = 0;
         }
 
-        // --- DRAW LOGIC ---
-        // Keep the same mouse mapping for drawing (hover effects use GetMousePosition)
         BeginDrawing();
         ClearBackground(UI_BACKGROUND);
 
-        // Content area (clipped so nothing leaks into the sidebar)
         BeginScissorMode(SIDEBAR_WIDTH, 0, SCREEN_WIDTH - SIDEBAR_WIDTH, SCREEN_HEIGHT);
 
         Camera2D cam = {0};
@@ -234,6 +240,10 @@ int main(void)
         {
             CLLVisualizerDraw();
         }
+        else if (selectedModule == 7)
+        {
+            BSTVisualizerDraw();
+        }
         else
         {
             DrawText(modules[selectedModule], 285, 45, 30, UI_CYAN);
@@ -243,7 +253,6 @@ int main(void)
         EndMode2D();
         EndScissorMode();
 
-        // Sidebar on top with the normal, unscaled mouse
         ResetMouseMapping();
         DrawSidebar();
 
