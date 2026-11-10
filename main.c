@@ -7,6 +7,7 @@
 #include "graphics/binary_tree_visualizer.h"
 #include "graphics/avl_visualizer.h"
 #include "graphics/heap_visualizer.h"
+#include "graphics/graph_visualizer.h"
 
 #define SCREEN_WIDTH 1200
 #define SCREEN_HEIGHT 750
@@ -116,11 +117,11 @@ static void DrawDashboard(void)
     DrawText("Explore. Visualize. Master Algorithms.", 285, 80, 16, UI_MUTED);
 
     const char *titles[] = {"SORTING", "STACK", "QUEUE",
-                          "LINKED LIST", "DOUBLY LINKED", "CIRCULAR LIST"};
+                            "LINKED LIST", "DOUBLY LINKED", "CIRCULAR LIST"};
     const char *descriptions[] = {"Visualize sorting algorithms",
-                                 "Practice PUSH, POP and PEEK", "Explore ENQUEUE and DEQUEUE",
-                                 "Understand node connections", "Explore bidirectional links",
-                                 "Explore circular node loops"};
+                                  "Practice PUSH, POP and PEEK", "Explore ENQUEUE and DEQUEUE",
+                                  "Understand node connections", "Explore bidirectional links",
+                                  "Explore circular node loops"};
     Color accents[] = {UI_CYAN, UI_PURPLE, UI_CYAN, UI_PURPLE, UI_CYAN, UI_PURPLE};
 
     Vector2 mousePos = GetMousePosition();
@@ -132,7 +133,7 @@ static void DrawDashboard(void)
         Rectangle card = {285 + col * 290, 145 + row * 215, 265, 180};
         int hover = CheckCollisionPointRec(mousePos, card);
         DrawRectangleRounded(card, 0.12f, 8,
-                           hover ? (Color){39, 48, 72, 255} : UI_CARD);
+                             hover ? (Color){39, 48, 72, 255} : UI_CARD);
         DrawRectangle((int)card.x, (int)card.y, 265, 5, accents[i]);
         DrawText(titles[i], (int)card.x + 18, (int)card.y + 30, 18, accents[i]);
         DrawText(descriptions[i], (int)card.x + 18, (int)card.y + 75, 13, UI_WHITE);
@@ -164,6 +165,7 @@ int main(void)
     BSTVisualizerInit();
     AVLVisualizerInit();
     HeapVisualizerInit();
+    GraphVisualizerInit();
 
     while (!WindowShouldClose())
     {
@@ -220,6 +222,13 @@ int main(void)
             if (HeapVisualizerWantsDashboard())
                 selectedModule = 0;
         }
+        else if (selectedModule == 10)
+        {
+            GraphVisualizerUpdate();
+
+            if (GraphVisualizerWantsDashboard())
+                selectedModule = 0;
+        }
 
         BeginDrawing();
         ClearBackground(UI_BACKGROUND);
@@ -273,6 +282,10 @@ int main(void)
         else if (selectedModule == 9)
         {
             HeapVisualizerDraw();
+        }
+        else if (selectedModule == 10)
+        {
+            GraphVisualizerDraw();
         }
         else
         {
