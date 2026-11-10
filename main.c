@@ -5,6 +5,7 @@
 #include "graphics/doubly_linked_list_visualizer.h"
 #include "graphics/circular_linked_list_visualizer.h"
 #include "graphics/binary_tree_visualizer.h"
+#include "graphics/avl_visualizer.h"
 
 #define SCREEN_WIDTH 1200
 #define SCREEN_HEIGHT 750
@@ -24,15 +25,16 @@ static const Color UI_MUTED = {145, 157, 180, 255};
 static int selectedModule = 0;
 
 // 0: Dashboard
-// 1: Sorting Visualizer
+// 1: Sorting Visualizer (Placeholder)
 // 2: Stack Visualizer
 // 3: Queue Visualizer
 // 4: Linked List Visualizer
 // 5: Doubly Linked List Visualizer
 // 6: Circular Linked List
-// 7: Tree Visualizer
-// 8: Graph Algorithms
-// 9: AlgoQuest Challenge
+// 7: Binary Search Tree Visualizer
+// 8: AVL Tree Visualizer
+// 9: Graph Algorithms (Placeholder)
+// 10: AlgoQuest Challenge (Placeholder)
 static const char *modules[] = {
     "Dashboard",
     "Sorting Visualizer",
@@ -42,9 +44,10 @@ static const char *modules[] = {
     "Doubly Linked List Visualizer",
     "Circular Linked List",
     "Binary Search Tree Visualizer",
+    "AVL Tree Visualizer",
     "Graph Algorithms",
     "AlgoQuest Challenge"};
-#define MODULE_COUNT 10
+#define MODULE_COUNT 11
 
 // 1 = visualizer was made for full 1200px width -> scale it to fit beside the sidebar
 // 0 = draw normally (already leaves room for the sidebar)
@@ -53,11 +56,14 @@ static const int moduleNeedsFit[MODULE_COUNT] = {
     0, // Sorting
     1, // Stack
     1, // Queue
-    0, // Linked List (already looks correct)
+    0, // Linked List
     1, // Doubly Linked List
     1, // Circular Linked List
-    1, // Binary Search Tree Visualizer (Fixed to fit beside sidebar)
-    0, 0};
+    1, // Binary Search Tree Visualizer
+    1, // AVL Tree Visualizer
+    0, // Graph Algorithms
+    0  // AlgoQuest Challenge
+};
 
 static void ResetMouseMapping(void)
 {
@@ -67,7 +73,6 @@ static void ResetMouseMapping(void)
 
 static void ApplyFitMouseMapping(void)
 {
-    // screen -> content coordinates: (screen - sidebar) / scale
     SetMouseOffset(-SIDEBAR_WIDTH, 0);
     SetMouseScale(1.0f / FIT_SCALE, 1.0f / FIT_SCALE);
 }
@@ -83,11 +88,11 @@ static void DrawSidebar(void)
 
     for (int i = 0; i < MODULE_COUNT; i++)
     {
-        Rectangle button = {20, 75 + i * 45, 210, 38};
+        Rectangle button = {20, 70 + i * 40, 210, 34};
         int hover = CheckCollisionPointRec(mousePos, button);
         Color fill = selectedModule == i ? UI_CYAN : (hover ? (Color){45, 55, 80, 255} : UI_CARD);
         DrawRectangleRounded(button, 0.18f, 8, fill);
-        DrawText(modules[i], (int)button.x + 12, (int)button.y + 11, 12,
+        DrawText(modules[i], (int)button.x + 10, (int)button.y + 10, 11,
                  selectedModule == i ? UI_BACKGROUND : UI_WHITE);
 
         if (hover && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
@@ -96,12 +101,11 @@ static void DrawSidebar(void)
         }
     }
 
-    DrawLine(20, 532, 230, 532, UI_MUTED);
-    DrawText("ALGOQUEST v1.2", 30, 545, 13, UI_CYAN);
-    DrawText("Developed in C", 30, 565, 11, UI_MUTED);
+    DrawLine(20, 525, 230, 525, UI_MUTED);
+    DrawText("ALGOQUEST v1.2", 30, 538, 13, UI_CYAN);
+    DrawText("Developed in C", 30, 558, 11, UI_MUTED);
 }
 
-// Dashboard content only (sidebar is drawn separately in main)
 static void DrawDashboard(void)
 {
     DrawText("Welcome to AlgoQuest", 285, 35, 30, UI_WHITE);
@@ -110,9 +114,9 @@ static void DrawDashboard(void)
     const char *titles[] = {"SORTING", "STACK", "QUEUE",
                             "LINKED LIST", "DOUBLY LINKED", "CIRCULAR LIST"};
     const char *descriptions[] = {"Visualize sorting algorithms",
-                                 "Practice PUSH, POP and PEEK", "Explore ENQUEUE and DEQUEUE",
-                                 "Understand node connections", "Explore bidirectional links",
-                                 "Explore circular node loops"};
+                                  "Practice PUSH, POP and PEEK", "Explore ENQUEUE and DEQUEUE",
+                                  "Understand node connections", "Explore bidirectional links",
+                                  "Explore circular node loops"};
     Color accents[] = {UI_CYAN, UI_PURPLE, UI_CYAN, UI_PURPLE, UI_CYAN, UI_PURPLE};
 
     Vector2 mousePos = GetMousePosition();
@@ -124,7 +128,7 @@ static void DrawDashboard(void)
         Rectangle card = {285 + col * 290, 145 + row * 215, 265, 180};
         int hover = CheckCollisionPointRec(mousePos, card);
         DrawRectangleRounded(card, 0.12f, 8,
-                            hover ? (Color){39, 48, 72, 255} : UI_CARD);
+                             hover ? (Color){39, 48, 72, 255} : UI_CARD);
         DrawRectangle((int)card.x, (int)card.y, 265, 5, accents[i]);
         DrawText(titles[i], (int)card.x + 18, (int)card.y + 30, 18, accents[i]);
         DrawText(descriptions[i], (int)card.x + 18, (int)card.y + 75, 13, UI_WHITE);
@@ -154,6 +158,7 @@ int main(void)
     DLLVisualizerInit();
     CLLVisualizerInit();
     BSTVisualizerInit();
+    AVLVisualizerInit();
 
     while (!WindowShouldClose())
     {
@@ -196,6 +201,12 @@ int main(void)
         {
             BSTVisualizerUpdate();
             if (BSTVisualizerWantsDashboard())
+                selectedModule = 0;
+        }
+        else if (selectedModule == 8)
+        {
+            AVLVisualizerUpdate();
+            if (AVLVisualizerWantsDashboard())
                 selectedModule = 0;
         }
 
@@ -243,6 +254,10 @@ int main(void)
         else if (selectedModule == 7)
         {
             BSTVisualizerDraw();
+        }
+        else if (selectedModule == 8)
+        {
+            AVLVisualizerDraw();
         }
         else
         {
