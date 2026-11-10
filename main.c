@@ -6,6 +6,7 @@
 #include "graphics/circular_linked_list_visualizer.h"
 #include "graphics/binary_tree_visualizer.h"
 #include "graphics/avl_visualizer.h"
+#include "graphics/heap_visualizer.h"
 
 #define SCREEN_WIDTH 1200
 #define SCREEN_HEIGHT 750
@@ -33,8 +34,9 @@ static int selectedModule = 0;
 // 6: Circular Linked List
 // 7: Binary Search Tree Visualizer
 // 8: AVL Tree Visualizer
-// 9: Graph Algorithms (Placeholder)
-// 10: AlgoQuest Challenge (Placeholder)
+// 9: Heap & Priority Queue
+// 10: Graph Algorithms (Placeholder)
+// 11: AlgoQuest Challenge (Placeholder)
 static const char *modules[] = {
     "Dashboard",
     "Sorting Visualizer",
@@ -45,9 +47,10 @@ static const char *modules[] = {
     "Circular Linked List",
     "Binary Search Tree Visualizer",
     "AVL Tree Visualizer",
+    "Heap & Priority Queue",
     "Graph Algorithms",
     "AlgoQuest Challenge"};
-#define MODULE_COUNT 11
+#define MODULE_COUNT 12
 
 // 1 = visualizer was made for full 1200px width -> scale it to fit beside the sidebar
 // 0 = draw normally (already leaves room for the sidebar)
@@ -61,6 +64,7 @@ static const int moduleNeedsFit[MODULE_COUNT] = {
     1, // Circular Linked List
     1, // Binary Search Tree Visualizer
     1, // AVL Tree Visualizer
+    1, // Heap & Priority Queue (Fit enabled)
     0, // Graph Algorithms
     0  // AlgoQuest Challenge
 };
@@ -88,11 +92,11 @@ static void DrawSidebar(void)
 
     for (int i = 0; i < MODULE_COUNT; i++)
     {
-        Rectangle button = {20, 70 + i * 40, 210, 34};
+        Rectangle button = {20, 75 + i * 36, 210, 32};
         int hover = CheckCollisionPointRec(mousePos, button);
         Color fill = selectedModule == i ? UI_CYAN : (hover ? (Color){45, 55, 80, 255} : UI_CARD);
         DrawRectangleRounded(button, 0.18f, 8, fill);
-        DrawText(modules[i], (int)button.x + 10, (int)button.y + 10, 11,
+        DrawText(modules[i], (int)button.x + 10, (int)button.y + 9, 11,
                  selectedModule == i ? UI_BACKGROUND : UI_WHITE);
 
         if (hover && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
@@ -101,9 +105,9 @@ static void DrawSidebar(void)
         }
     }
 
-    DrawLine(20, 525, 230, 525, UI_MUTED);
-    DrawText("ALGOQUEST v1.2", 30, 538, 13, UI_CYAN);
-    DrawText("Developed in C", 30, 558, 11, UI_MUTED);
+    DrawLine(20, 515, 230, 515, UI_MUTED);
+    DrawText("ALGOQUEST v1.2", 30, 528, 13, UI_CYAN);
+    DrawText("Developed in C", 30, 548, 11, UI_MUTED);
 }
 
 static void DrawDashboard(void)
@@ -112,11 +116,11 @@ static void DrawDashboard(void)
     DrawText("Explore. Visualize. Master Algorithms.", 285, 80, 16, UI_MUTED);
 
     const char *titles[] = {"SORTING", "STACK", "QUEUE",
-                            "LINKED LIST", "DOUBLY LINKED", "CIRCULAR LIST"};
+                          "LINKED LIST", "DOUBLY LINKED", "CIRCULAR LIST"};
     const char *descriptions[] = {"Visualize sorting algorithms",
-                                  "Practice PUSH, POP and PEEK", "Explore ENQUEUE and DEQUEUE",
-                                  "Understand node connections", "Explore bidirectional links",
-                                  "Explore circular node loops"};
+                                 "Practice PUSH, POP and PEEK", "Explore ENQUEUE and DEQUEUE",
+                                 "Understand node connections", "Explore bidirectional links",
+                                 "Explore circular node loops"};
     Color accents[] = {UI_CYAN, UI_PURPLE, UI_CYAN, UI_PURPLE, UI_CYAN, UI_PURPLE};
 
     Vector2 mousePos = GetMousePosition();
@@ -128,7 +132,7 @@ static void DrawDashboard(void)
         Rectangle card = {285 + col * 290, 145 + row * 215, 265, 180};
         int hover = CheckCollisionPointRec(mousePos, card);
         DrawRectangleRounded(card, 0.12f, 8,
-                             hover ? (Color){39, 48, 72, 255} : UI_CARD);
+                           hover ? (Color){39, 48, 72, 255} : UI_CARD);
         DrawRectangle((int)card.x, (int)card.y, 265, 5, accents[i]);
         DrawText(titles[i], (int)card.x + 18, (int)card.y + 30, 18, accents[i]);
         DrawText(descriptions[i], (int)card.x + 18, (int)card.y + 75, 13, UI_WHITE);
@@ -159,6 +163,7 @@ int main(void)
     CLLVisualizerInit();
     BSTVisualizerInit();
     AVLVisualizerInit();
+    HeapVisualizerInit();
 
     while (!WindowShouldClose())
     {
@@ -207,6 +212,12 @@ int main(void)
         {
             AVLVisualizerUpdate();
             if (AVLVisualizerWantsDashboard())
+                selectedModule = 0;
+        }
+        else if (selectedModule == 9)
+        {
+            HeapVisualizerUpdate();
+            if (HeapVisualizerWantsDashboard())
                 selectedModule = 0;
         }
 
@@ -258,6 +269,10 @@ int main(void)
         else if (selectedModule == 8)
         {
             AVLVisualizerDraw();
+        }
+        else if (selectedModule == 9)
+        {
+            HeapVisualizerDraw();
         }
         else
         {
