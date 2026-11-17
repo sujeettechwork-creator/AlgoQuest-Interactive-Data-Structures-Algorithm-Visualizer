@@ -1,4 +1,5 @@
 #include "raylib.h"
+#include "graphics/ui.h"
 #include "graphics/stack_visualizer.h"
 #include "graphics/queue_visualizer.h"
 #include "graphics/linked_list_visualizer.h"
@@ -9,308 +10,209 @@
 #include "graphics/heap_visualizer.h"
 #include "graphics/graph_visualizer.h"
 #include "graphics/sorting_visualizer.h"
+#include "graphics/challenge_visualizer.h"
+
+#include <math.h>
 
 #define SCREEN_WIDTH 1200
 #define SCREEN_HEIGHT 750
 #define SIDEBAR_WIDTH 250
 
-// Scale used for visualizers that were designed for the full 1200px width
-#define FIT_SCALE ((float)(SCREEN_WIDTH - SIDEBAR_WIDTH) / (float)SCREEN_WIDTH)
-
-static const Color UI_BACKGROUND = {15, 18, 32, 255};
-static const Color UI_SIDEBAR = {21, 26, 43, 255};
-static const Color UI_CARD = {29, 36, 56, 255};
-static const Color UI_CYAN = {0, 210, 220, 255};
-static const Color UI_PURPLE = {150, 100, 255, 255};
-static const Color UI_WHITE = {240, 245, 255, 255};
-static const Color UI_MUTED = {145, 157, 180, 255};
-
-static int selectedModule = 0;
-
-// 0: Dashboard
-// 1: Sorting Visualizer
-// 2: Stack Visualizer
-// 3: Queue Visualizer
-// 4: Linked List Visualizer
-// 5: Doubly Linked List Visualizer
-// 6: Circular Linked List
-// 7: Binary Search Tree Visualizer
-// 8: AVL Tree Visualizer
-// 9: Heap & Priority Queue
-// 10: Graph Algorithms
-// 11: AlgoQuest Challenge (Placeholder)
-static const char *modules[] = {
-    "Dashboard",
-    "Sorting Visualizer",
-    "Stack Visualizer",
-    "Queue Visualizer",
-    "Linked List Visualizer",
-    "Doubly Linked List Visualizer",
-    "Circular Linked List",
-    "Binary Search Tree Visualizer",
-    "AVL Tree Visualizer",
-    "Heap & Priority Queue",
-    "Graph Algorithms",
-    "AlgoQuest Challenge"};
-#define MODULE_COUNT 12
-
-// 1 = visualizer was made for full 1200px width -> scale it to fit beside the sidebar
-// 0 = draw normally (already leaves room for the sidebar)
-static const int moduleNeedsFit[MODULE_COUNT] = {
-    0, // Dashboard
-    0, // Sorting
-    1, // Stack
-    1, // Queue
-    0, // Linked List
-    1, // Doubly Linked List
-    1, // Circular Linked List
-    1, // Binary Search Tree Visualizer
-    1, // AVL Tree Visualizer
-    1, // Heap & Priority Queue (Fit enabled)
-    0, // Graph Algorithms
-    0  // AlgoQuest Challenge
-};
-
-static void ResetMouseMapping(void)
+typedef struct
 {
-    SetMouseOffset(0, 0);
-    SetMouseScale(1.0f, 1.0f);
+    const char *name;
+    const char *desc;
+    const char *tag;
+    int accent; /* 0 cyan, 1 purple, 2 amber */
+    void (*init)(void);
+    void (*draw)(void);
+} Module;
+
+static const Module modules[] = {
+    {"Sorting Visualizer", "Bubble, Selection, Insertion,\nMerge and Quick sort animated", "O(n log n)", 0, SortingVisualizerInit, SortingVisualizerDraw},
+    {"Stack Visualizer", "LIFO with push, pop and peek\nplus overflow detection", "O(1) ops", 1, StackVisualizerInit, StackVisualizerDraw},
+    {"Queue Visualizer", "Linear vs circular queues with\nFRONT and REAR pointers", "O(1) ops", 0, QueueVisualizerInit, QueueVisualizerDraw},
+    {"Linked List", "Nodes, pointers and a live\nmemory layout view", "O(n) search", 1, LinkedListVisualizerInit, LinkedListVisualizerDraw},
+    {"Doubly Linked List", "Prev / next links with\nbidirectional arrows", "O(n) search", 0, DLLVisualizerInit, DLLVisualizerDraw},
+    {"Circular Linked List", "Tail links back to head,\nreverse and insert anywhere", "O(n) search", 1, CLLVisualizerInit, CLLVisualizerDraw},
+    {"Binary Search Tree", "Animated search paths and\nthree traversal orders", "O(h) ops", 0, BSTVisualizerInit, BSTVisualizerDraw},
+    {"AVL Tree", "Self-balancing tree with\nlive balance factors", "O(log n)", 1, AVLVisualizerInit, AVLVisualizerDraw},
+    {"Heap & Priority Queue", "Min / max heap, tree and\narray views side by side", "O(log n)", 0, HeapVisualizerInit, HeapVisualizerDraw},
+    {"Graph Algorithms", "Drag vertices, run BFS and\nDFS step by step", "O(V + E)", 1, GraphVisualizerInit, GraphVisualizerDraw},
+    {"AlgoQuest Challenge", "Timed quiz: test what you\nhave learned so far", "10 questions", 2, ChallengeVisualizerInit, ChallengeVisualizerDraw}};
+
+#define MODULE_COUNT ((int)(sizeof(modules) / sizeof(modules[0])))
+
+static int selected = 0; /* 0 = dashboard, 1..MODULE_COUNT = modules */
+static float fade = 1.0f;
+static float dashT = 0.0f;
+static float sideHover[MODULE_COUNT + 1];
+
+static Color Accent(int id)
+{
+    switch (id)
+    {
+    case 0: return C_CYAN;
+    case 1: return C_PURPLE;
+    default: return C_AMBER;
+    }
 }
 
-static void ApplyFitMouseMapping(void)
+static void Select(int index)
 {
-    SetMouseOffset(-SIDEBAR_WIDTH, 0);
-    SetMouseScale(1.0f / FIT_SCALE, 1.0f / FIT_SCALE);
+    if (index == selected)
+        return;
+
+    selected = index;
+    fade = 1.0f;
+
+    if (index == 0)
+        dashT = 0.0f;
 }
 
 static void DrawSidebar(void)
 {
-    DrawRectangle(0, 0, SIDEBAR_WIDTH, SCREEN_HEIGHT, UI_SIDEBAR);
-    DrawText("ALGO", 30, 20, 28, UI_CYAN);
-    DrawText("QUEST", 105, 20, 28, UI_WHITE);
-    DrawText("LEARN DATA STRUCTURES", 30, 55, 10, UI_MUTED);
+    DrawRectangleGradientV(0, 0, SIDEBAR_WIDTH, SCREEN_HEIGHT, (Color){16, 21, 40, 255}, (Color){10, 13, 26, 255});
+    DrawLine(SIDEBAR_WIDTH - 1, 0, SIDEBAR_WIDTH - 1, SCREEN_HEIGHT, Fade(C_BORDER, 0.8f));
 
-    Vector2 mousePos = GetMousePosition();
+    float pulse = 0.5f + 0.5f * sinf(UITime() * 2.0f);
+    DrawCircleV((Vector2){40, 36}, 22.0f + 3.0f * pulse, Fade(C_CYAN, 0.10f));
+    DrawText("ALGO", 30, 20, 28, C_CYAN);
+    DrawText("QUEST", 106, 20, 28, C_WHITE);
+    DrawText("LEARN DATA STRUCTURES", 30, 54, 10, C_MUTED);
 
-    for (int i = 0; i < MODULE_COUNT; i++)
+    Vector2 mouse = GetMousePosition();
+
+    for (int i = 0; i <= MODULE_COUNT; i++)
     {
-        Rectangle button = {20, 75 + i * 36, 210, 32};
-        int hover = CheckCollisionPointRec(mousePos, button);
-        Color fill = selectedModule == i ? UI_CYAN : (hover ? (Color){45, 55, 80, 255} : UI_CARD);
-        DrawRectangleRounded(button, 0.18f, 8, fill);
-        DrawText(modules[i], (int)button.x + 10, (int)button.y + 9, 11,
-                 selectedModule == i ? UI_BACKGROUND : UI_WHITE);
+        const char *name = i == 0 ? "Dashboard" : modules[i - 1].name;
+        Color accent = i == 0 ? C_WHITE : Accent(modules[i - 1].accent);
+        Rectangle b = {16, 82.0f + i * 40.0f, 218, 34};
+        int hover = CheckCollisionPointRec(mouse, b);
+        int on = selected == i;
+
+        sideHover[i] = UIApproach(sideHover[i], (hover || on) ? 1.0f : 0.0f, 14.0f);
+
+        float slide = sideHover[i] * 6.0f;
+        Rectangle r = {b.x + slide, b.y, b.width - slide, b.height};
+
+        DrawRectangleRounded(r, 0.25f, 8, on ? Fade(accent, 0.95f) : Fade(C_PANEL2, 0.75f * sideHover[i]));
+
+        if (!on)
+            DrawRectangle((int)b.x, (int)b.y + 7, 3, 20, Fade(accent, 0.8f * sideHover[i]));
+
+        DrawText(name, (int)r.x + 14, (int)r.y + 10, 13, on ? UITextOn(accent) : (hover ? C_WHITE : C_MUTED));
+
+        if (hover)
+            SetMouseCursor(MOUSE_CURSOR_POINTING_HAND);
 
         if (hover && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
-        {
-            selectedModule = i;
-        }
+            Select(i);
     }
 
-    DrawLine(20, 515, 230, 515, UI_MUTED);
-    DrawText("ALGOQUEST v1.2", 30, 528, 13, UI_CYAN);
-    DrawText("Developed in C", 30, 548, 11, UI_MUTED);
+    DrawLine(20, 580, 230, 580, Fade(C_BORDER, 0.8f));
+    DrawText("TIP", 30, 596, 11, C_CYAN);
+    DrawText("ESC returns to the\ndashboard from any module.", 30, 614, 11, C_MUTED);
+    DrawText("ALGOQUEST v2.0", 30, 690, 13, C_CYAN);
+    DrawText("Developed in C + raylib", 30, 708, 11, C_MUTED);
+    DrawFPS(176, 726);
 }
 
 static void DrawDashboard(void)
 {
-    DrawText("Welcome to AlgoQuest", 285, 35, 30, UI_WHITE);
-    DrawText("Explore. Visualize. Master Algorithms.", 285, 80, 16, UI_MUTED);
+    UIBackground();
 
-    const char *titles[] = {"SORTING", "STACK", "QUEUE",
-                          "LINKED LIST", "DOUBLY LINKED", "CIRCULAR LIST"};
-    const char *descriptions[] = {"Visualize sorting algorithms",
-                                 "Practice PUSH, POP and PEEK", "Explore ENQUEUE and DEQUEUE",
-                                 "Understand node connections", "Explore bidirectional links",
-                                 "Explore circular node loops"};
-    Color accents[] = {UI_CYAN, UI_PURPLE, UI_CYAN, UI_PURPLE, UI_CYAN, UI_PURPLE};
+    dashT += GetFrameTime();
 
-    Vector2 mousePos = GetMousePosition();
+    DrawText("Welcome to AlgoQuest", 40, 22, 36, C_WHITE);
+    DrawText("Explore. Visualize. Master Algorithms.", 40, 66, 16, C_MUTED);
+    DrawRectangleGradientH(40, 90, 380, 2, C_CYAN, Fade(C_CYAN, 0.0f));
 
-    for (int i = 0; i < 6; i++)
+    for (int i = 0; i < MODULE_COUNT; i++)
     {
+        const Module *m = &modules[i];
+        Color accent = Accent(m->accent);
+
+        float e = UIClampf((dashT - i * 0.05f) * 4.0f, 0.0f, 1.0f);
+        e = 1.0f - (1.0f - e) * (1.0f - e);
+
         int col = i % 3;
         int row = i / 3;
-        Rectangle card = {285 + col * 290, 145 + row * 215, 265, 180};
-        int hover = CheckCollisionPointRec(mousePos, card);
-        DrawRectangleRounded(card, 0.12f, 8,
-                            hover ? (Color){39, 48, 72, 255} : UI_CARD);
-        DrawRectangle((int)card.x, (int)card.y, 265, 5, accents[i]);
-        DrawText(titles[i], (int)card.x + 18, (int)card.y + 30, 18, accents[i]);
-        DrawText(descriptions[i], (int)card.x + 18, (int)card.y + 75, 13, UI_WHITE);
-        DrawText("OPEN MODULE", (int)card.x + 18, (int)card.y + 135, 12, UI_MUTED);
+        Rectangle card = {30.0f + col * 300.0f, 112.0f + row * 148.0f + (1.0f - e) * 24.0f, 290, 134};
+        int hover = e > 0.99f && CheckCollisionPointRec(GetMousePosition(), card);
+
+        if (hover)
+        {
+            card.y -= 4;
+            SetMouseCursor(MOUSE_CURSOR_POINTING_HAND);
+            DrawRectangleRounded((Rectangle){card.x - 5, card.y - 5, card.width + 10, card.height + 10}, 0.12f, 8, Fade(accent, 0.18f));
+        }
+
+        DrawRectangleRounded((Rectangle){card.x + 3, card.y + 6, card.width, card.height}, 0.1f, 8, Fade(BLACK, 0.4f * e));
+        DrawRectangleRounded(card, 0.1f, 8, Fade(hover ? C_PANEL2 : C_PANEL, e));
+        DrawRectangleRoundedLinesEx(card, 0.1f, 8, 1.0f, Fade(hover ? accent : C_BORDER, e));
+        DrawRectangleRounded((Rectangle){card.x + 14, card.y, 60, 4}, 0.5f, 4, Fade(accent, e));
+
+        DrawText(TextFormat("%02d", i + 1), (int)card.x + 236, (int)card.y + 14, 22, Fade(accent, 0.35f * e));
+        DrawText(m->name, (int)card.x + 16, (int)card.y + 18, 18, Fade(accent, e));
+        DrawText(m->desc, (int)card.x + 16, (int)card.y + 50, 13, Fade(C_WHITE, e));
+
+        Rectangle chip = {card.x + 16, card.y + 100, (float)MeasureText(m->tag, 12) + 18, 22};
+        DrawRectangleRounded(chip, 0.5f, 6, Fade(accent, 0.18f * e));
+        DrawText(m->tag, (int)chip.x + 9, (int)chip.y + 5, 12, Fade(accent, e));
+        DrawText("OPEN >", (int)card.x + 222, (int)card.y + 104, 12, Fade(hover ? accent : C_MUTED, e));
 
         if (hover && IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
-        {
-            selectedModule = i + 1;
-        }
+            Select(i + 1);
     }
 
-    DrawText("Phase 2: Data Structures Visualizer", 285, 600, 19, UI_WHITE);
-    DrawText("Select a module from the sidebar or dashboard cards.",
-             285, 635, 15, UI_MUTED);
+    DrawText("Select a module from the sidebar or click a card.   Press ESC anywhere to come back here.", 40, 722, 13, C_MUTED);
 }
 
 int main(void)
 {
-    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "AlgoQuest - Data Structures Visualizer");
+    SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT);
+    InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "AlgoQuest - Data Structures & Algorithms Visualizer");
     SetTargetFPS(60);
-
     SetExitKey(KEY_NULL);
 
-    StackVisualizerInit();
-    QueueVisualizerInit();
-    LinkedListVisualizerInit();
-    DLLVisualizerInit();
-    CLLVisualizerInit();
-    BSTVisualizerInit();
-    AVLVisualizerInit();
-    HeapVisualizerInit();
-    GraphVisualizerInit();
-    SortingVisualizerInit();
+    for (int i = 0; i < MODULE_COUNT; i++)
+        modules[i].init();
 
     while (!WindowShouldClose())
     {
-        if (moduleNeedsFit[selectedModule])
-            ApplyFitMouseMapping();
-        else
-            ResetMouseMapping();
+        UIFrame();
 
-        if (selectedModule == 1)
-        {
-            SortingVisualizerUpdate();
-            if (SortingVisualizerWantsDashboard())
-                selectedModule = 0;
-        }
-        else if (selectedModule == 2)
-        {
-            StackVisualizerUpdate();
-            if (StackVisualizerWantsDashboard())
-                selectedModule = 0;
-        }
-        else if (selectedModule == 3)
-        {
-            QueueVisualizerUpdate();
-            if (QueueVisualizerWantsDashboard())
-                selectedModule = 0;
-        }
-        else if (selectedModule == 4)
-        {
-            LinkedListVisualizerUpdate();
-            if (LinkedListVisualizerWantsDashboard())
-                selectedModule = 0;
-        }
-        else if (selectedModule == 5)
-        {
-            DLLVisualizerUpdate();
-            if (DLLVisualizerWantsDashboard())
-                selectedModule = 0;
-        }
-        else if (selectedModule == 6)
-        {
-            CLLVisualizerUpdate();
-            if (CLLVisualizerWantsDashboard())
-                selectedModule = 0;
-        }
-        else if (selectedModule == 7)
-        {
-            BSTVisualizerUpdate();
-            if (BSTVisualizerWantsDashboard())
-                selectedModule = 0;
-        }
-        else if (selectedModule == 8)
-        {
-            AVLVisualizerUpdate();
-            if (AVLVisualizerWantsDashboard())
-                selectedModule = 0;
-        }
-        else if (selectedModule == 9)
-        {
-            HeapVisualizerUpdate();
-            if (HeapVisualizerWantsDashboard())
-                selectedModule = 0;
-        }
-        else if (selectedModule == 10)
-        {
-            GraphVisualizerUpdate();
-            if (GraphVisualizerWantsDashboard())
-                selectedModule = 0;
-        }
+        if (IsKeyPressed(KEY_ESCAPE) && selected != 0)
+            Select(0);
+
+        fade = UIApproach(fade, 0.0f, 9.0f);
 
         BeginDrawing();
-        ClearBackground(UI_BACKGROUND);
+        ClearBackground(C_BG);
 
-        BeginScissorMode(SIDEBAR_WIDTH, 0, SCREEN_WIDTH - SIDEBAR_WIDTH, SCREEN_HEIGHT);
+        /* content is drawn in a local 950x750 space to the right of the sidebar */
+        SetMouseOffset(-SIDEBAR_WIDTH, 0);
+        BeginScissorMode(SIDEBAR_WIDTH, 0, CW, SCREEN_HEIGHT);
 
         Camera2D cam = {0};
-        cam.offset = (Vector2){0.0f, 0.0f};
-        cam.target = (Vector2){0.0f, 0.0f};
+        cam.offset = (Vector2){(float)SIDEBAR_WIDTH, 0.0f};
         cam.zoom = 1.0f;
-
-        if (moduleNeedsFit[selectedModule])
-        {
-            cam.offset = (Vector2){(float)SIDEBAR_WIDTH, 0.0f};
-            cam.zoom = FIT_SCALE;
-        }
-
         BeginMode2D(cam);
-        if (selectedModule == 0)
-        {
+
+        if (selected == 0)
             DrawDashboard();
-        }
-        else if (selectedModule == 1)
-        {
-            SortingVisualizerDraw();
-        }
-        else if (selectedModule == 2)
-        {
-            StackVisualizerDraw();
-        }
-        else if (selectedModule == 3)
-        {
-            QueueVisualizerDraw();
-        }
-        else if (selectedModule == 4)
-        {
-            LinkedListVisualizerDraw();
-        }
-        else if (selectedModule == 5)
-        {
-            DLLVisualizerDraw();
-        }
-        else if (selectedModule == 6)
-        {
-            CLLVisualizerDraw();
-        }
-        else if (selectedModule == 7)
-        {
-            BSTVisualizerDraw();
-        }
-        else if (selectedModule == 8)
-        {
-            AVLVisualizerDraw();
-        }
-        else if (selectedModule == 9)
-        {
-            HeapVisualizerDraw();
-        }
-        else if (selectedModule == 10)
-        {
-            GraphVisualizerDraw();
-        }
         else
-        {
-            DrawText(modules[selectedModule], 285, 45, 30, UI_CYAN);
-            DrawText("This module will be implemented in a later phase.",
-                     285, 110, 18, UI_WHITE);
-        }
+            modules[selected - 1].draw();
+
+        if (fade > 0.01f)
+            DrawRectangle(0, 0, CW, CH, Fade(C_BG, fade));
+
         EndMode2D();
         EndScissorMode();
+        SetMouseOffset(0, 0);
 
-        ResetMouseMapping();
         DrawSidebar();
-
-        DrawFPS(1120, 15);
         EndDrawing();
     }
 

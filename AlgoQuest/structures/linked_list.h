@@ -20,5 +20,6 @@ int LinkedListInsertAt(LinkedList *list, int index, int value);
 int LinkedListDeleteValue(LinkedList *list, int value);
 int LinkedListSearch(const LinkedList *list, int value);
 void LinkedListClear(LinkedList *list);
+void LinkedListReverse(LinkedList *list);
 
 #endif

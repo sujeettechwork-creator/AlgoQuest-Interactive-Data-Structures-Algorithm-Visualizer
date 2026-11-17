@@ -1,378 +1,353 @@
 #include "graph_visualizer.h"
+#include "ui.h"
 #include "../structures/graph.h"
 
-#include "raylib.h"
-#include <stdio.h>
-#include <string.h>
 #include <ctype.h>
 #include <math.h>
+#include <stdio.h>
+#include <string.h>
+
+#define NODE_R 24.0f
 
 static Graph graph;
+static Vector2 pos[GRAPH_MAX_VERTICES];
+static char edgeBuf[4];
+static char startBuf[3];
+static int activeEdge = 0;
+static int activeStart = 1;
+static UIStatus st;
 
-static char edgeInput[3] = "";
-static char startInput[2] = "";
+static int trav[GRAPH_MAX_VERTICES];
+static int travCount = 0;
+static float travProgress = 0.0f;
+static int travBFS = 1;
+static int dragging = -1;
+static int edgeFrom = -1;
 
-static int edgeLength = 0;
-static int startLength = 0;
-static int activeInput = 0;
-static int wantsDashboard = 0;
+static const Rectangle canvas = {325, 100, 595, 420};
 
-static int traversal[GRAPH_MAX_VERTICES];
-static int traversalCount = 0;
-static char traversalName[20] = "None";
-
-static char message[100] = "Add vertices to create a graph.";
-static Color messageColor;
-
-static Rectangle edgeBox = {285, 115, 90, 35};
-static Rectangle startBox = {500, 115, 65, 35};
-
-static Rectangle addVertexButton = {285, 165, 125, 38};
-static Rectangle addEdgeButton = {425, 165, 125, 38};
-static Rectangle bfsButton = {565, 165, 85, 38};
-static Rectangle dfsButton = {665, 165, 85, 38};
-static Rectangle clearButton = {765, 165, 100, 38};
-
-static Vector2 positions[GRAPH_MAX_VERTICES];
-
-static int MouseOver(Rectangle rect)
+static Vector2 SlotPos(int i)
 {
-    return CheckCollisionPointRec(GetMousePosition(), rect);
-}
-
-static void SetMessage(const char *text, Color color)
-{
-    snprintf(message, sizeof(message), "%s", text);
-    messageColor = color;
-}
-
-static int GetVertexIndex(char label)
-{
-    label = (char)toupper((unsigned char)label);
-
-    if (label < 'A' || label >= 'A' + graph.vertexCount)
-        return -1;
-
-    return label - 'A';
-}
-
-static void DrawButton(Rectangle rect, const char *label)
-{
-    Color fill = MouseOver(rect) ? SKYBLUE : LIGHTGRAY;
-
-    DrawRectangleRounded(rect, 0.15f, 6, fill);
-    DrawRectangleRoundedLines(rect, 0.15f, 6, DARKGRAY);
-
-    int width = MeasureText(label, 15);
-
-    DrawText(label,
-             (int)(rect.x + (rect.width - width) / 2),
-             (int)(rect.y + 11),
-             15, BLACK);
-}
-
-static void CalculatePositions(void)
-{
-    // Positioned on the right side to avoid overlapping with left-hand controls and matrices
-    float centerX = 830.0f;
-    float centerY = 430.0f;
-    float radius = graph.vertexCount <= 4 ? 120.0f : 145.0f;
-
-    for (int i = 0; i < graph.vertexCount; i++) {
-        float angle = -PI / 2.0f +
-                      (2.0f * PI * i / graph.vertexCount);
-
-        positions[i].x = centerX + cosf(angle) * radius;
-        positions[i].y = centerY + sinf(angle) * radius;
-    }
-}
-
-static void DrawGraph(void)
-{
-    CalculatePositions();
-
-    // Draw edges first.
-    for (int i = 0; i < graph.vertexCount; i++) {
-        for (int j = i + 1; j < graph.vertexCount; j++) {
-            if (graph.adj[i][j]) {
-                DrawLineEx(positions[i], positions[j], 3, GRAY);
-            }
-        }
-    }
-
-    // Draw vertices.
-    for (int i = 0; i < graph.vertexCount; i++) {
-        DrawCircleV(positions[i], 25, SKYBLUE);
-        DrawCircleLinesV(positions[i], 25, DARKBLUE);
-
-        char label[2] = {(char)('A' + i), '\0'};
-        int width = MeasureText(label, 21);
-
-        DrawText(label,
-                 (int)positions[i].x - width / 2,
-                 (int)positions[i].y - 11,
-                 21, BLACK);
-    }
-
-    if (graph.vertexCount == 0) {
-        const char *placeholder = "Your graph will appear here.";
-        int width = MeasureText(placeholder, 18);
-        DrawText(placeholder, 830 - width / 2, 430, 18, GRAY);
-    }
-}
-
-static void DrawAdjacencyMatrix(void)
-{
-    int x = 285;
-    int y = 265;
-    int cell = 27;
-
-    DrawText("ADJACENCY MATRIX", x, y - 25, 16, DARKBLUE);
-
-    for (int i = 0; i < graph.vertexCount; i++) {
-        char label[2] = {(char)('A' + i), '\0'};
-
-        DrawText(label, x + 35 + i * cell + 8, y, 14, DARKBLUE);
-        DrawText(label, x + 10, y + 25 + i * cell, 14, DARKBLUE);
-    }
-
-    for (int i = 0; i < graph.vertexCount; i++) {
-        for (int j = 0; j < graph.vertexCount; j++) {
-            int cx = x + 35 + j * cell;
-            int cy = y + 22 + i * cell;
-
-            DrawRectangle(cx, cy, 24, 24,
-                          graph.adj[i][j] ? SKYBLUE : LIGHTGRAY);
-
-            DrawRectangleLines(cx, cy, 24, 24, GRAY);
-
-            char value[2] = {
-                graph.adj[i][j] ? '1' : '0', '\0'
-            };
-
-            DrawText(value, cx + 7, cy + 4, 14, BLACK);
-        }
-    }
-}
-
-static void DrawTraversal(void)
-{
-    int x = 285;
-    int y = 545;
-
-    DrawText("TRAVERSAL RESULT", x, y, 17, DARKBLUE);
-    DrawText(traversalName, x, y + 24, 16, MAROON);
-
-    if (traversalCount == 0) {
-        DrawText("Run BFS or DFS to see the order.", x, y + 52, 14, GRAY);
-        return;
-    }
-
-    char result[120] = "";
-
-    for (int i = 0; i < traversalCount; i++) {
-        char part[12];
-
-        snprintf(part, sizeof(part), "%c%s",
-                 'A' + traversal[i],
-                 i == traversalCount - 1 ? "" : " -> ");
-
-        strncat(result, part, sizeof(result) - strlen(result) - 1);
-    }
-
-    DrawText(result, x, y + 52, 15, DARKGREEN);
-}
-
-static void RunTraversal(int useBFS)
-{
-    if (graph.vertexCount == 0) {
-        SetMessage("Add vertices before running traversal.", RED);
-        return;
-    }
-
-    if (startLength != 1) {
-        SetMessage("Enter a starting vertex, such as A.", RED);
-        return;
-    }
-
-    int start = GetVertexIndex(startInput[0]);
-
-    if (start < 0) {
-        SetMessage("Starting vertex does not exist.", RED);
-        return;
-    }
-
-    if (useBFS) {
-        traversalCount = GraphBFS(&graph, start, traversal);
-        snprintf(traversalName, sizeof(traversalName), "BFS from %c",
-                 'A' + start);
-    } else {
-        traversalCount = GraphDFS(&graph, start, traversal);
-        snprintf(traversalName, sizeof(traversalName), "DFS from %c",
-                 'A' + start);
-    }
-
-    SetMessage("Traversal completed successfully.", GREEN);
+    float angle = -PI / 2.0f + 2.0f * PI * (float)i / (float)GRAPH_MAX_VERTICES;
+    return (Vector2){canvas.x + canvas.width / 2 + cosf(angle) * 160.0f,
+                     canvas.y + canvas.height / 2 + sinf(angle) * 150.0f};
 }
 
 void GraphVisualizerInit(void)
 {
     GraphInit(&graph);
+    edgeBuf[0] = startBuf[0] = '\0';
+    activeEdge = 0;
+    activeStart = 1;
+    travCount = 0;
+    travProgress = 0.0f;
+    dragging = edgeFrom = -1;
 
-    edgeInput[0] = '\0';
-    startInput[0] = '\0';
+    for (int i = 0; i < GRAPH_MAX_VERTICES; i++)
+        pos[i] = SlotPos(i);
 
-    edgeLength = 0;
-    startLength = 0;
-    activeInput = 0;
-    wantsDashboard = 0;
-
-    traversalCount = 0;
-    snprintf(traversalName, sizeof(traversalName), "None");
-
-    SetMessage("Add vertices to create a graph.", DARKGRAY);
+    UISetStatus(&st, "Add vertices, connect them, then run BFS or DFS.", C_CYAN);
 }
 
-void GraphVisualizerUpdate(void)
+static int VertexIndex(char label)
 {
-    if (IsKeyPressed(KEY_ESCAPE)) {
-        wantsDashboard = 1;
+    int i = toupper((unsigned char)label) - 'A';
+    return (i >= 0 && i < graph.vertexCount) ? i : -1;
+}
+
+static int VertexAt(Vector2 p)
+{
+    for (int i = graph.vertexCount - 1; i >= 0; i--)
+    {
+        float dx = p.x - pos[i].x, dy = p.y - pos[i].y;
+        if (dx * dx + dy * dy <= NODE_R * NODE_R)
+            return i;
+    }
+    return -1;
+}
+
+static void AddEdge(int a, int b)
+{
+    if (a < 0 || b < 0)
+        UISetStatus(&st, "Both vertices must exist (e.g. AB).", C_RED);
+    else if (a == b)
+        UISetStatus(&st, "Self-loops are not allowed.", C_RED);
+    else if (graph.adj[a][b])
+        UISetStatus(&st, "That edge already exists.", C_AMBER);
+    else if (GraphAddEdge(&graph, a, b))
+    {
+        travCount = 0;
+        UISetStatus(&st, TextFormat("Edge %c - %c added.", 'A' + a, 'A' + b), C_GREEN);
+    }
+}
+
+static void RunTraversal(int bfs)
+{
+    if (graph.vertexCount == 0)
+    {
+        UISetStatus(&st, "Add some vertices first.", C_RED);
         return;
     }
 
-    if (activeInput != 0) {
-        int key = GetCharPressed();
+    int start = 0;
 
-        while (key > 0) {
-            if (activeInput == 1 && edgeLength < 2 &&
-                isalpha((unsigned char)key)) {
-                edgeInput[edgeLength++] =
-                    (char)toupper((unsigned char)key);
-                edgeInput[edgeLength] = '\0';
-            }
+    if (startBuf[0] != '\0')
+    {
+        start = VertexIndex(startBuf[0]);
 
-            if (activeInput == 2 && startLength < 1 &&
-                isalpha((unsigned char)key)) {
-                startInput[startLength++] =
-                    (char)toupper((unsigned char)key);
-                startInput[startLength] = '\0';
-            }
-
-            key = GetCharPressed();
-        }
-
-        if (IsKeyPressed(KEY_BACKSPACE)) {
-            if (activeInput == 1 && edgeLength > 0) {
-                edgeInput[--edgeLength] = '\0';
-            }
-
-            if (activeInput == 2 && startLength > 0) {
-                startInput[--startLength] = '\0';
-            }
+        if (start < 0)
+        {
+            UISetStatus(&st, "That start vertex does not exist.", C_RED);
+            return;
         }
     }
 
-    if (!IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
-        return;
+    travCount = bfs ? GraphBFS(&graph, start, trav) : GraphDFS(&graph, start, trav);
+    travProgress = 0.0f;
+    travBFS = bfs;
+    UISetStatus(&st, TextFormat("%s from %c: visited %d vertex(es).", bfs ? "BFS" : "DFS", 'A' + start, travCount), C_PURPLE);
+}
 
-    if (MouseOver(edgeBox)) {
-        activeInput = 1;
-    }
-    else if (MouseOver(startBox)) {
-        activeInput = 2;
-    }
-    else if (MouseOver(addVertexButton)) {
-        if (GraphAddVertex(&graph)) {
-            char text[80];
+static void RandomGraph(void)
+{
+    GraphClear(&graph);
+    travCount = 0;
 
-            snprintf(text, sizeof(text), "Vertex %c added.",
-                     'A' + graph.vertexCount - 1);
-
-            SetMessage(text, GREEN);
-            traversalCount = 0;
-        } else {
-            SetMessage("Maximum of 8 vertices reached.", RED);
-        }
+    for (int i = 0; i < 6; i++)
+    {
+        GraphAddVertex(&graph);
+        pos[i] = SlotPos(i);
     }
-    else if (MouseOver(addEdgeButton)) {
-        if (edgeLength != 2) {
-            SetMessage("Enter two vertices, such as AB.", RED);
-        } else {
-            int from = GetVertexIndex(edgeInput[0]);
-            int to = GetVertexIndex(edgeInput[1]);
 
-            if (GraphAddEdge(&graph, from, to)) {
-                SetMessage("Edge added successfully.", GREEN);
-                traversalCount = 0;
-            } else {
-                SetMessage("Invalid vertices or self-edge.", RED);
-            }
-        }
+    for (int v = 1; v < 6; v++)
+        GraphAddEdge(&graph, v, GetRandomValue(0, v - 1));
 
-        edgeInput[0] = '\0';
-        edgeLength = 0;
-        activeInput = 0;
-    }
-    else if (MouseOver(bfsButton)) {
-        RunTraversal(1);
-        activeInput = 0;
-    }
-    else if (MouseOver(dfsButton)) {
-        RunTraversal(0);
-        activeInput = 0;
-    }
-    else if (MouseOver(clearButton)) {
-        GraphClear(&graph);
+    for (int i = 0; i < 3; i++)
+        GraphAddEdge(&graph, GetRandomValue(0, 5), GetRandomValue(0, 5));
 
-        edgeInput[0] = '\0';
-        startInput[0] = '\0';
-
-        edgeLength = 0;
-        startLength = 0;
-        activeInput = 0;
-        traversalCount = 0;
-
-        SetMessage("Graph cleared.", GREEN);
-    }
-    else {
-        activeInput = 0;
-    }
+    UISetStatus(&st, "Random connected graph created. Drag vertices to rearrange.", C_GREEN);
 }
 
 void GraphVisualizerDraw(void)
 {
-    DrawText("GRAPH ALGORITHMS VISUALIZER",
-             285, 35, 26, DARKBLUE);
+    Vector2 mouse = GetMousePosition();
 
-    DrawText("Edge (e.g. AB):", 285, 90, 16, DARKGRAY);
-    DrawRectangleRec(edgeBox, RAYWHITE);
-    DrawRectangleLinesEx(edgeBox, 1,
-                         activeInput == 1 ? BLUE : GRAY);
-    DrawText(edgeInput, 295, 124, 17, BLACK);
+    UIBackground();
+    UIHeader("GRAPH ALGORITHMS", "Undirected graph   |   drag vertices, right-click two vertices to connect them", C_GREEN);
 
-    DrawText("Start:", 500, 90, 16, DARKGRAY);
-    DrawRectangleRec(startBox, RAYWHITE);
-    DrawRectangleLinesEx(startBox, 1,
-                         activeInput == 2 ? BLUE : GRAY);
-    DrawText(startInput, 510, 124, 17, BLACK);
+    /* ---- controls ---- */
+    UICard((Rectangle){30, 100, 280, 300}, "CONTROLS", C_GREEN);
 
-    DrawButton(addVertexButton, "ADD VERTEX");
-    DrawButton(addEdgeButton, "ADD EDGE");
-    DrawButton(bfsButton, "RUN BFS");
-    DrawButton(dfsButton, "RUN DFS");
-    DrawButton(clearButton, "CLEAR");
+    DrawText("Edge (e.g. AB)", 50, 135, 13, C_MUTED);
+    if (UIInput((Rectangle){50, 155, 110, 42}, edgeBuf, sizeof(edgeBuf), &activeEdge, "AB", 1))
+        AddEdge(VertexIndex(edgeBuf[0]), edgeBuf[1] ? VertexIndex(edgeBuf[1]) : -1);
+    if (UIButton((Rectangle){170, 155, 120, 42}, "ADD EDGE", C_CYAN))
+    {
+        if (strlen(edgeBuf) == 2)
+            AddEdge(VertexIndex(edgeBuf[0]), VertexIndex(edgeBuf[1]));
+        else
+            UISetStatus(&st, "Type two vertex letters, such as AB.", C_RED);
+        edgeBuf[0] = '\0';
+    }
 
-    DrawText(message, 285, 220, 17, messageColor);
+    DrawText("Start vertex", 50, 212, 13, C_MUTED);
+    UIInput((Rectangle){50, 232, 110, 42}, startBuf, sizeof(startBuf), &activeStart, "A", 1);
+    if (UIButton((Rectangle){170, 232, 58, 42}, "BFS", C_PURPLE))
+        RunTraversal(1);
+    if (UIButton((Rectangle){232, 232, 58, 42}, "DFS", C_BLUE))
+        RunTraversal(0);
 
-    DrawGraph();
-    DrawAdjacencyMatrix();
-    DrawTraversal();
+    if (UIButton((Rectangle){50, 292, 240, 42}, "ADD VERTEX", C_GREEN))
+    {
+        if (graph.vertexCount < GRAPH_MAX_VERTICES && GraphAddVertex(&graph))
+        {
+            pos[graph.vertexCount - 1] = SlotPos(graph.vertexCount - 1);
+            travCount = 0;
+            UISetStatus(&st, TextFormat("Vertex %c added.", 'A' + graph.vertexCount - 1), C_GREEN);
+        }
+        else
+            UISetStatus(&st, "Maximum of 8 vertices reached.", C_RED);
+    }
 
-    DrawText("Undirected Graph | Maximum 8 vertices",
-             285, 715, 13, GRAY);
-}
+    if (UIButton((Rectangle){50, 345, 115, 42}, "RANDOM", C_AMBER))
+        RandomGraph();
+    if (UIButton((Rectangle){175, 345, 115, 42}, "CLEAR", C_RED))
+    {
+        GraphClear(&graph);
+        travCount = 0;
+        edgeFrom = dragging = -1;
+        UISetStatus(&st, "Graph cleared.", C_AMBER);
+    }
 
-int GraphVisualizerWantsDashboard(void)
-{
-    return wantsDashboard;
+    /* ---- adjacency matrix ---- */
+    UICard((Rectangle){30, 415, 280, 240}, "ADJACENCY MATRIX", C_CYAN);
+    {
+        int cell = 23;
+        int mx = 66, my = 466;
+
+        for (int i = 0; i < graph.vertexCount; i++)
+        {
+            DrawText(TextFormat("%c", 'A' + i), mx + i * cell + 7, my - 18, 13, C_CYAN);
+            DrawText(TextFormat("%c", 'A' + i), mx - 20, my + i * cell + 5, 13, C_CYAN);
+        }
+
+        for (int i = 0; i < graph.vertexCount; i++)
+            for (int j = 0; j < graph.vertexCount; j++)
+            {
+                Rectangle r = {(float)(mx + j * cell), (float)(my + i * cell), (float)cell - 2, (float)cell - 2};
+                int on = graph.adj[i][j];
+
+                DrawRectangleRounded(r, 0.2f, 4, on ? Fade(C_CYAN, 0.85f) : Fade(C_BG, 0.9f));
+                DrawText(on ? "1" : "0", (int)r.x + 8, (int)r.y + 5, 12, on ? C_BG : C_MUTED);
+            }
+
+    }
+
+    /* ---- canvas ---- */
+    UICard(canvas, "GRAPH VIEW", C_GREEN);
+
+    /* dragging */
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && CheckCollisionPointRec(mouse, canvas))
+        dragging = VertexAt(mouse);
+
+    if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT))
+        dragging = -1;
+
+    if (dragging >= 0)
+    {
+        pos[dragging].x = UIClampf(mouse.x, canvas.x + NODE_R + 4, canvas.x + canvas.width - NODE_R - 4);
+        pos[dragging].y = UIClampf(mouse.y, canvas.y + NODE_R + 30, canvas.y + canvas.height - NODE_R - 4);
+        SetMouseCursor(MOUSE_CURSOR_RESIZE_ALL);
+    }
+    else if (VertexAt(mouse) >= 0 && CheckCollisionPointRec(mouse, canvas))
+        SetMouseCursor(MOUSE_CURSOR_POINTING_HAND);
+
+    /* right-click edge creation */
+    if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT))
+    {
+        int hit = CheckCollisionPointRec(mouse, canvas) ? VertexAt(mouse) : -1;
+
+        if (hit < 0)
+            edgeFrom = -1;
+        else if (edgeFrom < 0)
+            edgeFrom = hit;
+        else
+        {
+            AddEdge(edgeFrom, hit);
+            edgeFrom = -1;
+        }
+    }
+
+    if (graph.vertexCount == 0)
+        DrawText("Your graph will appear here.  Press ADD VERTEX.", 420, 300, 20, Fade(C_MUTED, 0.8f));
+
+    if (travCount > 0)
+        travProgress += GetFrameTime() * 2.0f;
+
+    int shown = travCount > 0 ? (int)travProgress : 0;
+    if (shown > travCount)
+        shown = travCount;
+
+    int order[GRAPH_MAX_VERTICES];
+    for (int i = 0; i < GRAPH_MAX_VERTICES; i++)
+        order[i] = -1;
+    for (int k = 0; k < travCount; k++)
+        order[trav[k]] = k;
+
+    /* edges */
+    for (int i = 0; i < graph.vertexCount; i++)
+        for (int j = i + 1; j < graph.vertexCount; j++)
+        {
+            if (!graph.adj[i][j])
+                continue;
+
+            int lit = 0;
+
+            if (order[i] >= 0 && order[j] >= 0 && order[i] < shown && order[j] < shown)
+            {
+                int later = order[i] > order[j] ? i : j;
+                int earlier = later == i ? j : i;
+                int parent = -1;
+
+                /* tree edge heuristic: BFS = earliest visited neighbour, DFS = latest visited neighbour */
+                if (travBFS)
+                {
+                    for (int k = 0; k < order[later] && parent < 0; k++)
+                        if (graph.adj[later][trav[k]])
+                            parent = trav[k];
+                }
+                else
+                {
+                    for (int k = order[later] - 1; k >= 0 && parent < 0; k--)
+                        if (graph.adj[later][trav[k]])
+                            parent = trav[k];
+                }
+
+                lit = parent == earlier;
+            }
+
+            DrawLineEx(pos[i], pos[j], lit ? 5.0f : 3.0f, lit ? C_AMBER : (Color){80, 96, 140, 255});
+        }
+
+    if (edgeFrom >= 0)
+    {
+        DrawLineEx(pos[edgeFrom], mouse, 2.0f, Fade(C_GREEN, 0.7f));
+        DrawText("click a second vertex with the RIGHT button", (int)canvas.x + 16, (int)canvas.y + 392, 13, C_GREEN);
+    }
+
+    /* vertices */
+    for (int i = 0; i < graph.vertexCount; i++)
+    {
+        Color fill = C_PANEL2, border = C_CYAN;
+        float glow = 0.0f;
+
+        if (order[i] >= 0 && order[i] < shown)
+        {
+            fill = (Color){70, 50, 140, 255};
+            border = C_PURPLE;
+
+            if (order[i] == shown - 1)
+            {
+                fill = (Color){120, 84, 20, 255};
+                border = C_AMBER;
+                glow = 1.0f;
+            }
+        }
+
+        if (i == edgeFrom)
+        {
+            border = C_GREEN;
+            glow = 1.0f;
+        }
+
+        UINode(pos[i], NODE_R, TextFormat("%c", 'A' + i), fill, border, glow);
+    }
+
+    DrawText("Left-drag: move   |   Right-click A then B: connect", (int)canvas.x + 16, (int)canvas.y + 32, 13, C_MUTED);
+
+    /* ---- traversal result ---- */
+    UICard((Rectangle){325, 535, 595, 120}, "TRAVERSAL RESULT", C_PURPLE);
+
+    if (travCount == 0)
+        DrawText("Run BFS or DFS to see the visiting order.", 351, 580, 16, C_MUTED);
+    else
+    {
+        DrawText(travBFS ? "Breadth-First Search  (queue, level by level)" : "Depth-First Search  (stack / recursion, go deep first)",
+                 351, 552, 14, C_PURPLE);
+
+        int x = 351;
+
+        for (int k = 0; k < shown; k++)
+        {
+            Color c = (k == shown - 1) ? C_AMBER : C_CYAN;
+            UINode((Vector2){(float)x + 18, 612}, 18, TextFormat("%c", 'A' + trav[k]), C_PANEL2, c, k == shown - 1 ? 1.0f : 0.0f);
+
+            if (k < travCount - 1)
+                UIArrow((Vector2){(float)x + 38, 612}, (Vector2){(float)x + 62, 612}, Fade(C_MUTED, 0.8f), 2.0f);
+
+            x += 66;
+        }
+    }
+
+    UIStatusBar(&st, (Rectangle){30, 670, 890, 68});
 }

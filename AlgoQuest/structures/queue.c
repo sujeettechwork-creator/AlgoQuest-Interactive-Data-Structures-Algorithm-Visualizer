@@ -14,7 +14,7 @@ int QueueIsEmpty(const Queue *queue)
 
 int QueueIsFull(const Queue *queue)
 {
-    return queue->count == QUEUE_CAPACITY;
+    return queue->rear >= QUEUE_CAPACITY - 1;
 }
 
 int QueueEnqueue(Queue *queue, int value)

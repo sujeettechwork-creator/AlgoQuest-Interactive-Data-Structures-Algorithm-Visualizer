@@ -1,238 +1,231 @@
-/* graphics/heap_visualizer.c */
 #include "heap_visualizer.h"
+#include "ui.h"
 #include "../structures/heap.h"
 
-#include "raylib.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <math.h>
+#include <stdio.h>
 
-#ifndef UI_DARKGRAY
-#define UI_DARKGRAY DARKGRAY
-#endif
+#define HEAP_UI_MAX 31
+#define ROW_CELLS 16
 
 static Heap heap;
-static char input[16] = "";
-static int inputLength = 0;
-static char message[100] = "Enter a value and select an operation.";
-static Color messageColor;
-
-static Rectangle insertButton = {40, 145, 120, 42};
-static Rectangle extractButton = {175, 145, 145, 42};
-static Rectangle peekButton = {335, 145, 100, 42};
-static Rectangle clearButton = {450, 145, 100, 42};
-static Rectangle modeButton = {570, 145, 150, 42};
-
-static int IsMouseOver(Rectangle rect)
-{
-    return CheckCollisionPointRec(GetMousePosition(), rect);
-}
-
-static void SetMessage(const char *text, Color color)
-{
-    snprintf(message, sizeof(message), "%s", text);
-    messageColor = color;
-}
-
-static void DrawButton(Rectangle rect, const char *label)
-{
-    Color color = IsMouseOver(rect) ? SKYBLUE : LIGHTGRAY;
-
-    DrawRectangleRec(rect, color);
-    DrawRectangleLinesEx(rect, 1, UI_DARKGRAY);
-
-    int textWidth = MeasureText(label, 17);
-    DrawText(label,
-             (int)(rect.x + (rect.width - textWidth) / 2),
-             (int)(rect.y + 12),
-             17, BLACK);
-}
-
-static void DrawHeapNode(int index, float x, float y,
-                         float spread, int depth)
-{
-    if (index >= heap.size || depth > 4)
-        return;
-
-    int left = 2 * index + 1;
-    int right = 2 * index + 2;
-
-    float childY = y + 85;
-    float childSpread = spread / 2.0f;
-
-    if (left < heap.size) {
-        float childX = x - spread;
-        DrawLineEx((Vector2){x, y + 22},
-                   (Vector2){childX, childY}, 2, GRAY);
-        DrawHeapNode(left, childX, childY, childSpread, depth + 1);
-    }
-
-    if (right < heap.size) {
-        float childX = x + spread;
-        DrawLineEx((Vector2){x, y + 22},
-                   (Vector2){childX, childY}, 2, GRAY);
-        DrawHeapNode(right, childX, childY, childSpread, depth + 1);
-    }
-
-    DrawCircle((int)x, (int)y, 23, (depth == 0) ? GOLD : SKYBLUE);
-    DrawCircleLines((int)x, (int)y, 23, DARKBLUE);
-
-    char value[16];
-    snprintf(value, sizeof(value), "%d", heap.data[index]);
-
-    int width = MeasureText(value, 18);
-    DrawText(value, (int)x - width / 2, (int)y - 9, 18, BLACK);
-}
+static char buf[8];
+static int active = 1;
+static UIStatus st;
+static float px[HEAP_UI_MAX], py[HEAP_UI_MAX], flash[HEAP_UI_MAX];
+static int seen[HEAP_UI_MAX];
+static int prevVal[HEAP_UI_MAX];
+static int prevSize = 0;
 
 void HeapVisualizerInit(void)
 {
     HeapInit(&heap, 0);
-    input[0] = '\0';
-    inputLength = 0;
-    messageColor = UI_DARKGRAY;
-    SetMessage("Max Heap ready. Enter a value.", UI_DARKGRAY);
+    buf[0] = '\0';
+    active = 1;
+    prevSize = 0;
+
+    for (int i = 0; i < HEAP_UI_MAX; i++)
+    {
+        px[i] = py[i] = flash[i] = 0.0f;
+        seen[i] = 0;
+        prevVal[i] = 0;
+    }
+
+    UISetStatus(&st, "Max heap ready. Insert values and watch them bubble up.", C_AMBER);
 }
 
-void HeapVisualizerUpdate(void)
+static void DoInsert(void)
 {
-    int key = GetCharPressed();
+    int v;
 
-    while (key > 0) {
-        if (key >= '0' && key <= '9' && inputLength < 14) {
-            input[inputLength++] = (char)key;
-            input[inputLength] = '\0';
-        }
-        else if (key == '-' && inputLength == 0) {
-            input[inputLength++] = '-';
-            input[inputLength] = '\0';
-        }
-
-        key = GetCharPressed();
-    }
-
-    if (IsKeyPressed(KEY_BACKSPACE) && inputLength > 0) {
-        inputLength--;
-        input[inputLength] = '\0';
-    }
-
-    if (!IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+    if (!UIParseInt(buf, &v))
+    {
+        UISetStatus(&st, "Enter a valid integer.", C_RED);
         return;
-
-    if (IsMouseOver(insertButton)) {
-        if (inputLength == 0 || strcmp(input, "-") == 0) {
-            SetMessage("Enter a valid integer first.", RED);
-        } else {
-            int value = atoi(input);
-
-            if (HeapInsert(&heap, value))
-                SetMessage("Value inserted successfully.", GREEN);
-            else
-                SetMessage("Heap is full!", RED);
-
-            input[0] = '\0';
-            inputLength = 0;
-        }
     }
-    else if (IsMouseOver(extractButton)) {
-        int value;
 
-        if (HeapExtractRoot(&heap, &value)) {
-            char text[100];
-            snprintf(text, sizeof(text), "Extracted root: %d", value);
-            SetMessage(text, GREEN);
-        } else {
-            SetMessage("Heap is empty!", RED);
-        }
+    if (heap.size >= HEAP_UI_MAX)
+    {
+        UISetStatus(&st, "Display limit reached (31 items).", C_AMBER);
+        return;
     }
-    else if (IsMouseOver(peekButton)) {
-        int value;
 
-        if (HeapPeek(&heap, &value)) {
-            char text[100];
-            snprintf(text, sizeof(text), "Root value: %d", value);
-            SetMessage(text, GREEN);
-        } else {
-            SetMessage("Heap is empty!", RED);
-        }
+    if (HeapInsert(&heap, v))
+    {
+        UISetStatus(&st, TextFormat("Inserted %d at the end, then sifted up (heapify-up).", v), C_GREEN);
+        buf[0] = '\0';
     }
-    else if (IsMouseOver(clearButton)) {
-        HeapClear(&heap);
-        SetMessage("Heap cleared.", GREEN);
-    }
-    else if (IsMouseOver(modeButton)) {
-        int newMode = !heap.isMinHeap;
-
-        HeapClear(&heap);
-        HeapInit(&heap, newMode);
-
-        SetMessage("Heap mode changed. Previous values cleared.", ORANGE);
-    }
-}
-
-int HeapVisualizerWantsDashboard(void)
-{
-    return 0;
+    else
+        UISetStatus(&st, "Heap is full.", C_RED);
 }
 
 void HeapVisualizerDraw(void)
 {
-    const char *mode = heap.isMinHeap ? "MIN HEAP" : "MAX HEAP";
+    UIBackground();
+    UIHeader("HEAP & PRIORITY QUEUE", "Complete binary tree stored in an array   |   parent beats its children", C_AMBER);
 
-    DrawText("HEAP & PRIORITY QUEUE VISUALIZER",
-             40, 35, 27, DARKBLUE);
+    UICard((Rectangle){30, 100, 890, 140}, "OPERATIONS", C_AMBER);
 
-    DrawText(mode, 40, 85, 22, MAROON);
+    if (UIInput((Rectangle){50, 135, 170, 46}, buf, sizeof(buf), &active, "Enter value", 0))
+        DoInsert();
 
-    DrawText("Value:", 40, 112, 18, UI_DARKGRAY);
-    DrawRectangle(105, 108, 100, 27, RAYWHITE);
-    DrawRectangleLines(105, 108, 100, 27, GRAY);
-    DrawText(input, 112, 112, 18, BLACK);
+    if (UIButton((Rectangle){235, 135, 115, 46}, "INSERT", C_GREEN))
+        DoInsert();
 
-    DrawButton(insertButton, "INSERT");
-    DrawButton(extractButton, "EXTRACT ROOT");
-    DrawButton(peekButton, "PEEK");
-    DrawButton(clearButton, "CLEAR");
-    DrawButton(modeButton, "TOGGLE MODE");
+    if (UIButton((Rectangle){360, 135, 140, 46}, "EXTRACT ROOT", C_PURPLE))
+    {
+        int r;
 
-    DrawText(message, 40, 205, 18, messageColor);
-
-    DrawText("HEAP TREE", 40, 250, 20, DARKBLUE);
-
-    if (heap.size == 0) {
-        DrawText("Heap is empty. Insert values to build the tree.",
-                 40, 300, 18, GRAY);
-    } else {
-        DrawHeapNode(0, 600, 310, 250, 0);
+        if (HeapExtractRoot(&heap, &r))
+            UISetStatus(&st, TextFormat("Extracted root %d; last item moved to the top and sifted down.", r), C_GREEN);
+        else
+            UISetStatus(&st, "Heap is empty.", C_RED);
     }
 
-    DrawText("ARRAY REPRESENTATION", 40, 590, 18, DARKBLUE);
+    if (UIButton((Rectangle){510, 135, 95, 46}, "PEEK", C_BLUE))
+    {
+        int r;
 
-    int visible = heap.size < 15 ? heap.size : 15;
-
-    for (int i = 0; i < visible; i++) {
-        int x = 40 + i * 73;
-
-        DrawRectangle(x, 625, 62, 38, LIGHTGRAY);
-        DrawRectangleLines(x, 625, 62, 38, UI_DARKGRAY);
-
-        char value[16];
-        snprintf(value, sizeof(value), "%d", heap.data[i]);
-
-        int width = MeasureText(value, 17);
-        DrawText(value, x + (62 - width) / 2, 636, 17, BLACK);
-
-        char index[12];
-        snprintf(index, sizeof(index), "%d", i);
-        DrawText(index, x + 25, 668, 12, GRAY);
+        if (HeapPeek(&heap, &r))
+            UISetStatus(&st, TextFormat("Root (highest priority) is %d.", r), C_CYAN);
+        else
+            UISetStatus(&st, "Heap is empty.", C_RED);
     }
 
-    char sizeText[50];
-    snprintf(sizeText, sizeof(sizeText),
-             "Heap Size: %d / %d", heap.size, HEAP_CAPACITY);
+    if (UIButton((Rectangle){615, 135, 125, 46}, "ADD 5 RANDOM", C_CYAN))
+    {
+        int added = 0;
 
-    DrawText(sizeText, 850, 85, 18, UI_DARKGRAY);
+        for (int i = 0; i < 5 && heap.size < HEAP_UI_MAX; i++)
+            added += HeapInsert(&heap, GetRandomValue(1, 99));
 
-    DrawText("Priority Queue: Extract Root removes the highest-priority item.",
-             40, 685, 14, GRAY);
+        UISetStatus(&st, TextFormat("Inserted %d random value(s).", added), C_GREEN);
+    }
+
+    if (UIButton((Rectangle){750, 135, 100, 46}, "CLEAR", C_RED))
+    {
+        HeapClear(&heap);
+        UISetStatus(&st, "Heap cleared.", C_AMBER);
+    }
+
+    if (UIButton((Rectangle){50, 192, 210, 36}, heap.isMinHeap ? "MODE: MIN HEAP  (toggle)" : "MODE: MAX HEAP  (toggle)", C_PANEL2))
+    {
+        int vals[HEAP_UI_MAX];
+        int n = heap.size < HEAP_UI_MAX ? heap.size : HEAP_UI_MAX;
+
+        for (int i = 0; i < n; i++)
+            vals[i] = heap.data[i];
+
+        HeapInit(&heap, !heap.isMinHeap);
+
+        for (int i = 0; i < n; i++)
+            HeapInsert(&heap, vals[i]);
+
+        UISetStatus(&st, heap.isMinHeap ? "Switched to MIN heap: smallest value is the root."
+                                        : "Switched to MAX heap: largest value is the root.", C_AMBER);
+    }
+
+    DrawText("parent(i) = (i-1)/2     left(i) = 2i+1     right(i) = 2i+2", 280, 202, 14, C_MUTED);
+    DrawText(TextFormat("SIZE  %d / %d", heap.size, HEAP_UI_MAX), 760, 202, 14, C_AMBER);
+
+    /* detect changes so moved values flash */
+    for (int i = 0; i < HEAP_UI_MAX; i++)
+    {
+        if (i < heap.size)
+        {
+            if (i >= prevSize || heap.data[i] != prevVal[i])
+                flash[i] = 1.0f;
+            prevVal[i] = heap.data[i];
+        }
+        else
+        {
+            seen[i] = 0;
+            flash[i] = 0.0f;
+        }
+    }
+    prevSize = heap.size;
+
+    /* array cell rectangles + hover detection */
+    Vector2 mouse = GetMousePosition();
+    int hover = -1;
+
+    for (int i = 0; i < heap.size; i++)
+    {
+        Rectangle cell = {38.0f + (i % ROW_CELLS) * 55.0f, 592.0f + (i / ROW_CELLS) * 50.0f, 50, 30};
+        if (CheckCollisionPointRec(mouse, cell))
+            hover = i;
+    }
+
+    Rectangle canvas = {30, 250, 890, 310};
+    UICard(canvas, "HEAP TREE", C_AMBER);
+
+    float dy = 58.0f;
+
+    for (int i = 0; i < heap.size; i++)
+    {
+        int depth = 0;
+        while ((1 << (depth + 1)) - 1 <= i)
+            depth++;
+
+        int first = (1 << depth) - 1;
+        int slots = 1 << depth;
+        float tx = canvas.x + ((float)(i - first) + 0.5f) / (float)slots * canvas.width;
+        float ty = canvas.y + 52.0f + depth * dy;
+
+        if (!seen[i])
+        {
+            int p = i > 0 ? (i - 1) / 2 : 0;
+            px[i] = i > 0 ? px[p] : tx;
+            py[i] = i > 0 ? py[p] : ty;
+            seen[i] = 1;
+        }
+
+        px[i] = UIApproach(px[i], tx, 9.0f);
+        py[i] = UIApproach(py[i], ty, 9.0f);
+        flash[i] = UIApproach(flash[i], 0.0f, 1.6f);
+    }
+
+    if (heap.size == 0)
+        DrawText("Heap is empty  -  insert values to build the tree.", 300, 400, 20, Fade(C_MUTED, 0.8f));
+
+    for (int i = 1; i < heap.size; i++)
+    {
+        int p = (i - 1) / 2;
+        int lit = hover == i || hover == p;
+        DrawLineEx((Vector2){px[p], py[p]}, (Vector2){px[i], py[i]}, lit ? 3.5f : 2.0f,
+                   lit ? C_AMBER : (Color){80, 96, 140, 255});
+    }
+
+    for (int i = 0; i < heap.size; i++)
+    {
+        Color fill = i == 0 ? C_AMBER : C_PANEL2;
+        Color border = i == 0 ? C_AMBER : C_CYAN;
+        float glow = flash[i];
+
+        if (hover >= 0)
+        {
+            if (i == hover) { border = C_WHITE; glow = 1.0f; }
+            else if (hover > 0 && i == (hover - 1) / 2) { border = C_PURPLE; glow = 1.0f; }
+            else if (i == 2 * hover + 1 || i == 2 * hover + 2) { border = C_GREEN; glow = 1.0f; }
+        }
+
+        if (flash[i] > 0.05f)
+            border = UILerpColor(border, C_AMBER, flash[i]);
+
+        UINode((Vector2){px[i], py[i]}, 20.0f, TextFormat("%d", heap.data[i]), fill, border, glow);
+        DrawText(TextFormat("%d", i), (int)px[i] + 18, (int)py[i] - 28, 11, C_MUTED);
+    }
+
+    DrawText("ARRAY REPRESENTATION   (hover a cell: white = it, purple = parent, green = children)", 32, 567, 13, C_AMBER);
+
+    for (int i = 0; i < heap.size; i++)
+    {
+        Rectangle cell = {38.0f + (i % ROW_CELLS) * 55.0f, 592.0f + (i / ROW_CELLS) * 50.0f, 50, 30};
+        Color fill = UILerpColor(i == 0 ? (Color){110, 80, 20, 255} : C_PANEL2, (Color){130, 90, 20, 255}, flash[i]);
+
+        UICell(cell, TextFormat("%d", heap.data[i]), fill, hover == i ? C_WHITE : C_CYAN, 15);
+        DrawText(TextFormat("%d", i), (int)cell.x + 22 - (i >= 10 ? 3 : 0), (int)cell.y + 33, 11, C_MUTED);
+    }
+
+    UIStatusBar(&st, (Rectangle){30, 690, 890, 52});
 }
