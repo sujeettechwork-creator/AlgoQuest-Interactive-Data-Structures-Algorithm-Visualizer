@@ -134,3 +134,19 @@ void LinkedListClear(LinkedList *list)
     list->head = NULL;
     list->size = 0;
 }
+
+void LinkedListReverse(LinkedList *list)
+{
+    Node *previous = NULL;
+    Node *current = list->head;
+
+    while (current != NULL)
+    {
+        Node *next = current->next;
+        current->next = previous;
+        previous = current;
+        current = next;
+    }
+
+    list->head = previous;
+}

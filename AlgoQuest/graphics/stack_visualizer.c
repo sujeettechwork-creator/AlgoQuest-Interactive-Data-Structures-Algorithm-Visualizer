@@ -1,284 +1,176 @@
 #include "stack_visualizer.h"
+#include "ui.h"
 #include "../structures/stack.h"
 
-#include "raylib.h"
+#include <math.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <ctype.h>
 
-static const Color UI_BG = {15, 18, 32, 255};
-static const Color UI_PANEL = {25, 32, 51, 255};
-static const Color UI_CARD = {32, 41, 64, 255};
-static const Color UI_CYAN = {0, 210, 220, 255};
-static const Color UI_PURPLE = {150, 100, 255, 255};
-static const Color UI_WHITE = {240, 245, 255, 255};
-static const Color UI_MUTED = {145, 157, 180, 255};
-static const Color UI_GREEN = {60, 210, 130, 255};
-static const Color UI_RED = {245, 90, 105, 255};
-
-static Stack stackData;
-static char inputBuffer[12];
-static int inputLength = 0;
-static char statusMessage[100] = "Enter a number and press PUSH.";
-static Color statusColor;
-static bool inputActive = true;
-static bool returnToDashboard = false;
-static int operationCount = 0;
-static int lastAction = 0; /* 1 = push, 2 = pop, 3 = peek */
-
-// Button click check for Update logic
-static bool IsButtonClicked(Rectangle rect)
-{
-    Vector2 mouse = GetMousePosition();
-    return CheckCollisionPointRec(mouse, rect) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
-}
-
-// Button drawing for Draw logic
-static void DrawButton(Rectangle rect, const char *label, Color color)
-{
-    Vector2 mouse = GetMousePosition();
-    bool hover = CheckCollisionPointRec(mouse, rect);
-    DrawRectangleRounded(rect, 0.18f, 8,
-                         hover ? ColorBrightness(color, 0.18f) : color);
-    int fontSize = 18;
-    int textWidth = MeasureText(label, fontSize);
-    DrawText(label, (int)(rect.x + (rect.width - textWidth) / 2),
-             (int)(rect.y + (rect.height - fontSize) / 2),
-             fontSize, UI_WHITE);
-}
-
-static void SetStatus(const char *message, Color color)
-{
-    snprintf(statusMessage, sizeof(statusMessage), "%s", message);
-    statusColor = color;
-}
+static Stack stack;
+static char buf[8];
+static int active = 1;
+static UIStatus st;
+static int ops = 0;
+static float scaleIn[STACK_CAPACITY];
+static float ghostA = 0.0f;
+static int ghostVal = 0;
+static int ghostIdx = 0;
+static float peekFlash = 0.0f;
 
 void StackVisualizerInit(void)
 {
-    StackInit(&stackData);
-    inputBuffer[0] = '\0';
-    inputLength = 0;
-    operationCount = 0;
-    lastAction = 0;
-    returnToDashboard = false;
-    inputActive = true;
-    statusColor = UI_CYAN;
-    SetStatus("Enter a number and press PUSH.", UI_CYAN);
+    StackInit(&stack);
+    buf[0] = '\0';
+    active = 1;
+    ops = 0;
+    ghostA = 0.0f;
+    peekFlash = 0.0f;
+
+    for (int i = 0; i < STACK_CAPACITY; i++)
+        scaleIn[i] = 1.0f;
+
+    UISetStatus(&st, "Type a number and press PUSH (or Enter).", C_CYAN);
 }
 
-void StackVisualizerUpdate(void)
+static void DoPush(void)
 {
-    if (IsKeyPressed(KEY_ESCAPE))
+    int v;
+    char msg[120];
+
+    if (!UIParseInt(buf, &v))
     {
-        returnToDashboard = true;
+        UISetStatus(&st, "Enter a valid integer before PUSH.", C_RED);
         return;
     }
 
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+    if (StackPush(&stack, v))
     {
-        Rectangle inputRect = {320, 205, 180, 48};
-        inputActive = CheckCollisionPointRec(GetMousePosition(), inputRect);
+        scaleIn[stack.top] = 0.0f;
+        ops++;
+        snprintf(msg, sizeof(msg), "PUSH %d  ->  TOP moved to index %d.", v, stack.top);
+        UISetStatus(&st, msg, C_GREEN);
     }
+    else
+        UISetStatus(&st, "STACK OVERFLOW: the stack is full (capacity 8).", C_RED);
 
-    if (inputActive)
+    buf[0] = '\0';
+}
+
+static void DoPop(void)
+{
+    int removed;
+    char msg[120];
+
+    if (!StackIsEmpty(&stack))
     {
-        int key = GetCharPressed();
-        while (key > 0)
-        {
-            if ((key >= '0' && key <= '9') ||
-                (key == '-' && inputLength == 0))
-            {
-                if (inputLength < (int)sizeof(inputBuffer) - 1)
-                {
-                    inputBuffer[inputLength++] = (char)key;
-                    inputBuffer[inputLength] = '\0';
-                }
-            }
-            key = GetCharPressed();
-        }
-
-        if (IsKeyPressed(KEY_BACKSPACE) && inputLength > 0)
-        {
-            inputLength--;
-            inputBuffer[inputLength] = '\0';
-        }
-
-        if (IsKeyPressed(KEY_ENTER) && inputLength > 0)
-        {
-            int value = atoi(inputBuffer);
-            if (StackPush(&stackData, value))
-            {
-                operationCount++;
-                lastAction = 1;
-                SetStatus("PUSH successful: element added.", UI_GREEN);
-            }
-            else
-            {
-                SetStatus("STACK OVERFLOW: stack is full.", UI_RED);
-            }
-            inputBuffer[0] = '\0';
-            inputLength = 0;
-        }
+        ghostIdx = stack.top;
+        StackPop(&stack, &removed);
+        ghostVal = removed;
+        ghostA = 1.0f;
+        ops++;
+        snprintf(msg, sizeof(msg), "POP removed %d from the top.", removed);
+        UISetStatus(&st, msg, C_GREEN);
     }
-
-    if (IsButtonClicked((Rectangle){530, 205, 125, 48}))
-    {
-        if (inputLength > 0)
-        {
-            int value = atoi(inputBuffer);
-            if (StackPush(&stackData, value))
-            {
-                operationCount++;
-                lastAction = 1;
-                SetStatus("PUSH successful: element added.", UI_GREEN);
-            }
-            else
-                SetStatus("STACK OVERFLOW: stack is full.", UI_RED);
-
-            inputBuffer[0] = '\0';
-            inputLength = 0;
-        }
-        else
-            SetStatus("Enter a number before pressing PUSH.", UI_RED);
-    }
-
-    if (IsButtonClicked((Rectangle){675, 205, 125, 48}))
-    {
-        int removed;
-        if (StackPop(&stackData, &removed))
-        {
-            char message[100];
-            snprintf(message, sizeof(message), "POP successful: removed %d.", removed);
-            operationCount++;
-            lastAction = 2;
-            SetStatus(message, UI_GREEN);
-        }
-        else
-            SetStatus("STACK UNDERFLOW: stack is empty.", UI_RED);
-    }
-
-    if (IsButtonClicked((Rectangle){820, 205, 125, 48}))
-    {
-        int topValue;
-        if (StackPeek(&stackData, &topValue))
-        {
-            char message[100];
-            snprintf(message, sizeof(message), "PEEK: top element is %d.", topValue);
-            lastAction = 3;
-            SetStatus(message, UI_CYAN);
-        }
-        else
-            SetStatus("Cannot PEEK: stack is empty.", UI_RED);
-    }
-
-    if (IsButtonClicked((Rectangle){965, 205, 125, 48}))
-    {
-        StackInit(&stackData);
-        inputBuffer[0] = '\0';
-        inputLength = 0;
-        lastAction = 0;
-        operationCount++;
-        SetStatus("Stack cleared.", UI_CYAN);
-    }
-
-    if (IsButtonClicked((Rectangle){30, 30, 150, 42}))
-        returnToDashboard = true;
+    else
+        UISetStatus(&st, "STACK UNDERFLOW: the stack is empty.", C_RED);
 }
 
 void StackVisualizerDraw(void)
 {
-    ClearBackground(UI_BG);
+    UIBackground();
+    UIHeader("STACK VISUALIZER", "LIFO  -  Last In, First Out   |   array implementation", C_CYAN);
 
-    DrawText("STACK VISUALIZER", 220, 35, 30, UI_CYAN);
-    DrawText("Array implementation | LIFO: Last In, First Out",
-             220, 78, 16, UI_MUTED);
+    UICard((Rectangle){30, 100, 890, 110}, "OPERATIONS", C_CYAN);
 
-    DrawRectangleRounded((Rectangle){210, 130, 910, 150}, 0.04f, 8, UI_PANEL);
-    DrawText("STACK OPERATIONS", 240, 150, 16, UI_WHITE);
+    if (UIInput((Rectangle){50, 142, 190, 50}, buf, sizeof(buf), &active, "Enter value", 0))
+        DoPush();
 
-    // Draw Operation Buttons
-    DrawButton((Rectangle){530, 205, 125, 48}, "PUSH", UI_CYAN);
-    DrawButton((Rectangle){675, 205, 125, 48}, "POP", UI_PURPLE);
-    DrawButton((Rectangle){820, 205, 125, 48}, "PEEK", (Color){65, 105, 150, 255});
-    DrawButton((Rectangle){965, 205, 125, 48}, "CLEAR", (Color){115, 65, 85, 255});
-    DrawButton((Rectangle){30, 30, 150, 42}, "BACK", (Color){55, 65, 90, 255});
+    if (UIButton((Rectangle){260, 142, 120, 50}, "PUSH", C_CYAN))
+        DoPush();
 
-    DrawRectangleRounded((Rectangle){320, 205, 180, 48}, 0.15f, 8,
-                         inputActive ? (Color){45, 60, 85, 255} : UI_CARD);
-    
-    DrawText(inputBuffer[0] ? inputBuffer : "Enter value",
-             335, 219, 18, inputBuffer[0] ? UI_WHITE : UI_MUTED);
+    if (UIButton((Rectangle){390, 142, 120, 50}, "POP", C_PURPLE))
+        DoPop();
 
-    DrawText("INPUT", 320, 185, 11, UI_MUTED);
+    if (UIButton((Rectangle){520, 142, 120, 50}, "PEEK", C_BLUE))
+    {
+        int top;
+        char msg[100];
 
-    DrawText("Use the input box, type a number, then press PUSH or ENTER.",
-             320, 260, 12, UI_MUTED);
+        if (StackPeek(&stack, &top))
+        {
+            peekFlash = 1.0f;
+            snprintf(msg, sizeof(msg), "PEEK: the top element is %d (not removed).", top);
+            UISetStatus(&st, msg, C_CYAN);
+        }
+        else
+            UISetStatus(&st, "Cannot PEEK: the stack is empty.", C_RED);
+    }
 
-    DrawText("STACK MEMORY", 220, 315, 18, UI_WHITE);
-    DrawText(TextFormat("SIZE: %d / %d", StackSize(&stackData), STACK_CAPACITY),
-             900, 315, 16, UI_CYAN);
+    if (UIButton((Rectangle){650, 142, 120, 50}, "CLEAR", C_RED))
+    {
+        StackInit(&stack);
+        buf[0] = '\0';
+        ops++;
+        UISetStatus(&st, "Stack cleared.", C_AMBER);
+    }
 
-    const int cellX = 450;
-    const int cellY = 335;
-    const int cellW = 260;
-    const int cellH = 34;
-    const int gap = 5;
+    DrawText("Press Enter inside the box to push quickly.", 790 - 20, 150, 12, C_MUTED);
+
+    DrawText("STACK MEMORY", 60, 232, 18, C_WHITE);
+    DrawText(TextFormat("SIZE  %d / %d", StackSize(&stack), STACK_CAPACITY), 780, 232, 16, C_CYAN);
+
+    peekFlash = UIApproach(peekFlash, 0.0f, 2.5f);
+    ghostA = UIApproach(ghostA, 0.0f, 4.0f);
 
     for (int i = 0; i < STACK_CAPACITY; i++)
     {
-        int y = cellY + (STACK_CAPACITY - 1 - i) * (cellH + gap);
-        bool occupied = i <= stackData.top;
-        bool isTop = occupied && i == stackData.top;
-        Color cellColor = isTop ? UI_PURPLE :
-                          (occupied ? UI_CARD : (Color){21, 27, 43, 255});
-
-        DrawRectangleRounded((Rectangle){cellX, y, cellW, cellH},
-                             0.12f, 6, cellColor);
-        DrawRectangleLinesEx((Rectangle){cellX, y, cellW, cellH},
-                             1, occupied ? UI_CYAN : (Color){55, 65, 85, 255});
+        float y = 265.0f + (STACK_CAPACITY - 1 - i) * 46.0f;
+        int occupied = i <= stack.top;
+        int isTop = occupied && i == stack.top;
 
         if (occupied)
-            DrawText(TextFormat("%d", stackData.items[i]),
-                     cellX + 115, y + 10, 20, UI_WHITE);
-        else
-            DrawText("EMPTY", cellX + 105, y + 13, 14, UI_MUTED);
+            scaleIn[i] = UIApproach(scaleIn[i], 1.0f, 12.0f);
 
-        DrawText(TextFormat("[%d]", i), cellX - 55, y + 13, 14, UI_MUTED);
+        float sc = occupied ? scaleIn[i] : 1.0f;
+        Rectangle r = {300.0f + 270.0f * (1.0f - sc) / 2.0f, y - (1.0f - sc) * 40.0f,
+                       270.0f * sc, 38.0f};
+
+        Color fill = isTop ? UILerpColor(C_PURPLE, C_AMBER, peekFlash)
+                           : (occupied ? C_PANEL2 : Fade(C_PANEL, 0.7f));
+        Color border = occupied ? C_CYAN : Fade(C_BORDER, 0.8f);
 
         if (isTop)
-            DrawText("TOP  <-", cellX + cellW + 20, y + 13, 15, UI_CYAN);
+            DrawRectangleRounded((Rectangle){r.x - 6, r.y - 6, r.width + 12, r.height + 12},
+                                 0.3f, 8, Fade(C_PURPLE, 0.20f + 0.10f * sinf(UITime() * 4.0f)));
+
+        UICell(r, occupied ? TextFormat("%d", stack.items[i]) : "EMPTY", fill, border,
+               occupied ? 20 : 13);
+
+        DrawText(TextFormat("[%d]", i), 250, (int)y + 11, 14, C_MUTED);
+
+        if (isTop)
+            DrawText("<-  TOP", 590 + (int)(4.0f * sinf(UITime() * 5.0f)), (int)y + 10, 16, C_CYAN);
     }
 
-    DrawRectangleRounded((Rectangle){760, 335, 330, 180}, 0.05f, 8, UI_PANEL);
-    DrawText("STACK INFORMATION", 785, 390, 17, UI_WHITE);
-    DrawText("Rule: LIFO", 785, 430, 16, UI_CYAN);
-    DrawText(TextFormat("Top index: %d", stackData.top),
-             785, 462, 15, UI_WHITE);
-    DrawText(TextFormat("Operations: %d", operationCount),
-             785, 490, 15, UI_WHITE);
-    DrawText("Capacity: 8 elements", 785, 518, 14, UI_MUTED);
-
-    DrawRectangleRounded((Rectangle){220, 665, 870, 65},
-                         0.08f, 8, UI_PANEL);
-    DrawText("STATUS", 240, 680, 12, UI_MUTED);
-    DrawText(statusMessage, 240, 702, 17, statusColor);
-
-    DrawText("BACK or ESC: return to dashboard",
-             850, 35, 13, UI_MUTED);
-}
-
-void StackVisualizerClose(void)
-{
-    /* No dynamically allocated memory is used in this module. */
-}
-
-int StackVisualizerWantsDashboard(void)
-{
-    if (returnToDashboard)
+    if (ghostA > 0.02f)
     {
-        returnToDashboard = false;
-        return 1;
+        float y = 265.0f + (STACK_CAPACITY - 1 - ghostIdx) * 46.0f - (1.0f - ghostA) * 60.0f;
+        UICell((Rectangle){300, y, 270, 38}, TextFormat("%d", ghostVal),
+               Fade(C_PURPLE, ghostA), Fade(C_WHITE, ghostA), 20);
     }
-    return 0;
+
+    UICard((Rectangle){650, 265, 270, 215}, "STACK INFORMATION", C_PURPLE);
+    DrawText("Rule: LIFO", 672, 305, 17, C_CYAN);
+    DrawText(TextFormat("Top index:  %d", stack.top), 672, 337, 16, C_WHITE);
+    DrawText(TextFormat("Operations: %d", ops), 672, 365, 16, C_WHITE);
+    DrawText(StackIsEmpty(&stack) ? "State: EMPTY" : (StackIsFull(&stack) ? "State: FULL" : "State: OK"),
+             672, 393, 16, StackIsFull(&stack) ? C_RED : C_GREEN);
+
+    float fill = (float)StackSize(&stack) / STACK_CAPACITY;
+    DrawRectangleRounded((Rectangle){672, 430, 226, 14}, 0.5f, 6, C_BG);
+    if (fill > 0.0f)
+        DrawRectangleRounded((Rectangle){672, 430, 226 * fill, 14}, 0.5f, 6,
+                             UILerpColor(C_GREEN, C_RED, fill));
+    DrawText("Capacity: 8 elements", 672, 452, 13, C_MUTED);
+
+    UIStatusBar(&st, (Rectangle){30, 655, 890, 80});
 }

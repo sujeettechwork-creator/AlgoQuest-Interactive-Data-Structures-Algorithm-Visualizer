@@ -1,341 +1,198 @@
 #include "avl_visualizer.h"
+#include "tree_view.h"
 #include "../structures/avl_tree.h"
-#include "raylib.h"
 
 #include <stdio.h>
-#include <stdlib.h>
 
-#define WIDTH 1200
-#define MAX_NODES 100
+#define AVL_LIMIT 40
 
 static AVLTree tree;
-static char input[32] = "";
-static int inputLength = 0;
-static int inputActive = 0;
-static int returnDashboard = 0;
-static int highlightedValue = 0;
-static int highlightActive = 0;
-static char message[180] = "AVL Tree Ready.";
-
-static Color UI_BG = {15, 23, 42, 255};
-static Color UI_PANEL = {30, 41, 59, 255};
-static Color UI_CYAN = {34, 211, 238, 255};
-static Color UI_GREEN = {74, 222, 128, 255};
-static Color UI_RED = {248, 113, 113, 255};
-static Color UI_WHITE = {241, 245, 249, 255};
-
-static int Height(AVLNode *node)
-{
-    return node == NULL ? 0 : node->height;
-}
-
-static void SetMessage(const char *msg)
-{
-    snprintf(message, sizeof(message), "%s", msg);
-}
-
-static void ClearInput(void)
-{
-    inputLength = 0;
-    input[0] = '\0';
-    inputActive = 0;
-}
-
-static int ReadValue(int *value)
-{
-    if (inputLength == 0 ||
-        (inputLength == 1 && input[0] == '-'))
-        return 0;
-
-    *value = atoi(input);
-    return 1;
-}
-
-static int Clicked(Rectangle r)
-{
-    return IsMouseButtonPressed(MOUSE_BUTTON_LEFT) &&
-           CheckCollisionPointRec(GetMousePosition(), r);
-}
-
-static void DrawButton(Rectangle r, const char *label, Color color)
-{
-    int hover = CheckCollisionPointRec(GetMousePosition(), r);
-
-    DrawRectangleRounded(
-        r, 0.15f, 8,
-        hover ? ColorBrightness(color, 0.18f) : color);
-
-    DrawText(label,
-             (int)(r.x + r.width / 2 -
-                   MeasureText(label, 15) / 2),
-             (int)(r.y + 13), 15, UI_WHITE);
-}
-
-static void DrawAVLNode(AVLNode *node, float x, float y,
-                        float offset, int depth)
-{
-    if (node == NULL || depth > 6)
-        return;
-
-    float nextY = y + 75;
-    float nextOffset = offset / 2.0f;
-
-    if (node->left != NULL)
-    {
-        DrawLineEx((Vector2){x, y},
-                   (Vector2){x - offset, nextY},
-                   3, UI_GREEN);
-
-        DrawAVLNode(node->left, x - offset,
-                    nextY, nextOffset, depth + 1);
-    }
-
-    if (node->right != NULL)
-    {
-        DrawLineEx((Vector2){x, y},
-                   (Vector2){x + offset, nextY},
-                   3, UI_CYAN);
-
-        DrawAVLNode(node->right, x + offset,
-                    nextY, nextOffset, depth + 1);
-    }
-
-    int balance = Height(node->left) - Height(node->right);
-
-    Color nodeColor = UI_PANEL;
-
-    if (highlightActive && node->data == highlightedValue)
-        nodeColor = UI_GREEN;
-
-    DrawCircle((int)x, (int)y, 25, nodeColor);
-    DrawCircleLines((int)x, (int)y, 25, UI_CYAN);
-
-    DrawText(TextFormat("%d", node->data),
-             (int)x - MeasureText(TextFormat("%d", node->data), 17) / 2,
-             (int)y - 12, 17, UI_WHITE);
-
-    DrawText(TextFormat("H:%d B:%d", node->height, balance),
-             (int)x - 37, (int)y + 30, 12, UI_WHITE);
-}
-
-static void ShowTraversal(int type)
-{
-    int output[MAX_NODES];
-    int count;
-
-    if (type == 0)
-        count = AVLInorder(&tree, output, MAX_NODES);
-    else if (type == 1)
-        count = AVLPreorder(&tree, output, MAX_NODES);
-    else
-        count = AVLPostorder(&tree, output, MAX_NODES);
-
-    const char *name = type == 0 ? "INORDER" :
-                       type == 1 ? "PREORDER" : "POSTORDER";
-
-    int position = snprintf(message, sizeof(message), "%s: ", name);
-
-    for (int i = 0; i < count && position < 160; i++)
-    {
-        position += snprintf(message + position,
-                             sizeof(message) - position,
-                             "%d ", output[i]);
-    }
-
-    if (count == 0)
-        SetMessage("Tree is empty.");
-}
+static TVState tv;
+static TVNode nodes[TV_MAX];
+static char buf[8];
+static int active = 1;
+static UIStatus st;
 
 void AVLVisualizerInit(void)
 {
     AVLClear(&tree);
     AVLInit(&tree);
-
-    ClearInput();
-    returnDashboard = 0;
-    highlightActive = 0;
-
-    SetMessage("AVL Tree Ready.");
+    TVReset(&tv);
+    buf[0] = '\0';
+    active = 1;
+    UISetStatus(&st, "AVL tree ready. Try inserting 10, 20, 30 to see a rotation.", C_PURPLE);
 }
 
-void AVLVisualizerUpdate(void)
+static int H(const AVLNode *n) { return n ? n->height : 0; }
+
+static int Flatten(const AVLNode *t, int *n)
 {
-    if (IsKeyPressed(KEY_ESCAPE))
+    if (t == NULL || *n >= TV_MAX)
+        return -1;
+
+    int i = (*n)++;
+    nodes[i].value = t->data;
+    nodes[i].balance = H(t->left) - H(t->right);
+    int l = Flatten(t->left, n);
+    int r = Flatten(t->right, n);
+    nodes[i].left = l;
+    nodes[i].right = r;
+    return i;
+}
+
+static int RootValue(void) { return tree.root ? tree.root->data : 0; }
+
+static void DoInsert(void)
+{
+    int v;
+    char msg[140];
+
+    if (!UIParseInt(buf, &v))
     {
-        returnDashboard = 1;
+        UISetStatus(&st, "Enter a valid integer.", C_RED);
         return;
     }
 
-    Rectangle inputBox = {50, 125, 220, 42};
-
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
-        inputActive = CheckCollisionPointRec(
-            GetMousePosition(), inputBox);
-
-    if (inputActive)
+    if (tree.size >= AVL_LIMIT)
     {
-        int key = GetCharPressed();
-
-        while (key > 0)
-        {
-            if ((key >= '0' && key <= '9') ||
-                (key == '-' && inputLength == 0))
-            {
-                if (inputLength < 30)
-                {
-                    input[inputLength++] = (char)key;
-                    input[inputLength] = '\0';
-                }
-            }
-
-            key = GetCharPressed();
-        }
-
-        if (IsKeyPressed(KEY_BACKSPACE) && inputLength > 0)
-            input[--inputLength] = '\0';
-
-        if (IsKeyPressed(KEY_ENTER))
-            inputActive = 0;
-    }
-
-    Rectangle back = {20, 20, 110, 38};
-    Rectangle insert = {290, 125, 110, 42};
-    Rectangle search = {410, 125, 110, 42};
-    Rectangle deleteNode = {530, 125, 110, 42};
-    Rectangle clear = {650, 125, 110, 42};
-
-    Rectangle inorder = {50, 185, 140, 40};
-    Rectangle preorder = {205, 185, 140, 40};
-    Rectangle postorder = {360, 185, 140, 40};
-
-    if (Clicked(back))
-    {
-        returnDashboard = 1;
+        UISetStatus(&st, "Display limit reached (40 nodes).", C_AMBER);
         return;
     }
 
-    int value;
+    int oldRoot = RootValue();
 
-    if (Clicked(insert))
+    if (AVLInsert(&tree, v))
     {
-        if (ReadValue(&value))
-        {
-            int result = AVLInsert(&tree, value);
-            highlightActive = 0;
+        int p[1] = {v};
+        TVSetOrder(&tv, p, 1, 1);
 
-            SetMessage(result
-                       ? "Inserted. AVL balancing applied."
-                       : "Duplicate value or memory allocation failure.");
+        if (tree.size > 1 && RootValue() != oldRoot)
+            snprintf(msg, sizeof(msg), "Inserted %d. The root changed (%d -> %d): a rotation rebalanced the tree.",
+                     v, oldRoot, RootValue());
+        else
+            snprintf(msg, sizeof(msg), "Inserted %d. Balance factors updated (rotations applied if needed).", v);
 
-            ClearInput();
-        }
-        else SetMessage("Enter a valid integer.");
+        UISetStatus(&st, msg, C_GREEN);
+        buf[0] = '\0';
     }
-
-    if (Clicked(search))
-    {
-        if (ReadValue(&value))
-        {
-            highlightActive = AVLSearch(&tree, value);
-            highlightedValue = value;
-
-            SetMessage(highlightActive
-                       ? "Node found and highlighted."
-                       : "Node not found.");
-        }
-        else SetMessage("Enter a valid integer.");
-    }
-
-    if (Clicked(deleteNode))
-    {
-        if (ReadValue(&value))
-        {
-            highlightActive = 0;
-
-            SetMessage(AVLDelete(&tree, value)
-                       ? "Deleted. AVL balancing applied."
-                       : "Value not found.");
-
-            ClearInput();
-        }
-        else SetMessage("Enter a valid integer.");
-    }
-
-    if (Clicked(clear))
-    {
-        AVLClear(&tree);
-        highlightActive = 0;
-        ClearInput();
-        SetMessage("AVL Tree cleared.");
-    }
-
-    if (Clicked(inorder))
-        ShowTraversal(0);
-
-    if (Clicked(preorder))
-        ShowTraversal(1);
-
-    if (Clicked(postorder))
-        ShowTraversal(2);
+    else
+        UISetStatus(&st, "Duplicate value (AVL keeps unique keys).", C_RED);
 }
 
-int AVLVisualizerWantsDashboard(void)
+static void ShowTraversal(int type)
 {
-    return returnDashboard;
+    int out[TV_MAX];
+    int n = type == 0 ? AVLInorder(&tree, out, TV_MAX)
+                      : (type == 1 ? AVLPreorder(&tree, out, TV_MAX) : AVLPostorder(&tree, out, TV_MAX));
+
+    if (n == 0)
+    {
+        UISetStatus(&st, "The tree is empty.", C_RED);
+        return;
+    }
+
+    char msg[200];
+    int pos = snprintf(msg, sizeof(msg), "%s:  ", type == 0 ? "INORDER" : (type == 1 ? "PREORDER" : "POSTORDER"));
+
+    for (int i = 0; i < n && pos < (int)sizeof(msg) - 8; i++)
+        pos += snprintf(msg + pos, sizeof(msg) - (size_t)pos, "%d ", out[i]);
+
+    TVSetOrder(&tv, out, n, -1);
+    UISetStatus(&st, msg, C_PURPLE);
 }
 
 void AVLVisualizerDraw(void)
 {
-    ClearBackground(UI_BG);
-    DrawRectangle(0, 0, WIDTH, 85, UI_PANEL);
+    int v;
 
-    DrawButton((Rectangle){20, 20, 110, 38},
-               "BACK", UI_RED);
+    UIBackground();
+    UIHeader("AVL TREE VISUALIZER", "Self-balancing BST   |   balance factor = height(left) - height(right)", C_PURPLE);
 
-    DrawText("AVL TREE VISUALIZER",
-             160, 25, 28, UI_CYAN);
+    UICard((Rectangle){30, 100, 890, 150}, "OPERATIONS", C_PURPLE);
 
-    DrawText("Enter Value:", 50, 95, 17, UI_WHITE);
+    if (UIInput((Rectangle){50, 135, 170, 46}, buf, sizeof(buf), &active, "Enter value", 0))
+        DoInsert();
 
-    DrawRectangleRounded((Rectangle){50, 125, 220, 42},
-                         0.15f, 8, UI_PANEL);
+    if (UIButton((Rectangle){235, 135, 105, 46}, "INSERT", C_GREEN))
+        DoInsert();
 
-    DrawRectangleLinesEx((Rectangle){50, 125, 220, 42},
-                         2, inputActive ? UI_CYAN : UI_WHITE);
+    if (UIButton((Rectangle){350, 135, 105, 46}, "SEARCH", C_BLUE))
+    {
+        if (UIParseInt(buf, &v))
+        {
+            int found = AVLSearch(&tree, v);
+            int path[TV_MAX], n = 0;
+            const AVLNode *c = tree.root;
 
-    DrawText(input, 65, 137, 19, UI_WHITE);
+            while (c != NULL && n < TV_MAX)
+            {
+                path[n++] = c->data;
+                if (c->data == v)
+                    break;
+                c = v < c->data ? c->left : c->right;
+            }
 
-    DrawButton((Rectangle){290, 125, 110, 42},
-               "INSERT", UI_GREEN);
+            TVSetOrder(&tv, path, n, found);
+            UISetStatus(&st, found ? TextFormat("Found %d after %d comparison(s).", v, n)
+                                   : TextFormat("%d not found (%d comparison(s)).", v, n),
+                        found ? C_GREEN : C_RED);
+        }
+        else
+            UISetStatus(&st, "Enter a valid integer.", C_RED);
+    }
 
-    DrawButton((Rectangle){410, 125, 110, 42},
-               "SEARCH", UI_CYAN);
+    if (UIButton((Rectangle){465, 135, 105, 46}, "DELETE", C_RED))
+    {
+        if (UIParseInt(buf, &v))
+        {
+            if (AVLDelete(&tree, v))
+            {
+                TVSetOrder(&tv, NULL, 0, -1);
+                UISetStatus(&st, "Deleted. Ancestors were rebalanced on the way back up.", C_GREEN);
+                buf[0] = '\0';
+            }
+            else
+                UISetStatus(&st, "Value not found.", C_RED);
+        }
+        else
+            UISetStatus(&st, "Enter a valid integer.", C_RED);
+    }
 
-    DrawButton((Rectangle){530, 125, 110, 42},
-               "DELETE", UI_RED);
+    if (UIButton((Rectangle){580, 135, 125, 46}, "ADD 5 RANDOM", C_CYAN))
+    {
+        int added = 0;
 
-    DrawButton((Rectangle){650, 125, 110, 42},
-               "CLEAR", UI_RED);
+        for (int i = 0; i < 5 && tree.size < AVL_LIMIT; i++)
+            added += AVLInsert(&tree, GetRandomValue(1, 99));
 
-    DrawButton((Rectangle){50, 185, 140, 40},
-               "INORDER", UI_CYAN);
+        TVSetOrder(&tv, NULL, 0, -1);
+        UISetStatus(&st, TextFormat("Inserted %d random value(s).", added), C_GREEN);
+    }
 
-    DrawButton((Rectangle){205, 185, 140, 40},
-               "PREORDER", UI_GREEN);
+    if (UIButton((Rectangle){715, 135, 100, 46}, "CLEAR", C_RED))
+    {
+        AVLClear(&tree);
+        TVSetOrder(&tv, NULL, 0, -1);
+        UISetStatus(&st, "Tree cleared.", C_AMBER);
+    }
 
-    DrawButton((Rectangle){360, 185, 140, 40},
-               "POSTORDER", (Color){124, 58, 237, 255});
+    if (UIButton((Rectangle){50, 197, 125, 40}, "INORDER", C_CYAN))
+        ShowTraversal(0);
+    if (UIButton((Rectangle){185, 197, 125, 40}, "PREORDER", C_GREEN))
+        ShowTraversal(1);
+    if (UIButton((Rectangle){320, 197, 135, 40}, "POSTORDER", C_PURPLE))
+        ShowTraversal(2);
 
-    DrawText("AVL TREE STRUCTURE",
-             50, 255, 22, UI_CYAN);
+    DrawText("Green bf = perfectly balanced, amber bf = leaning by one. Every node stays within +/- 1.",
+             480, 208, 13, C_MUTED);
 
-    if (tree.root == NULL)
-        DrawText("EMPTY TREE", 500, 430, 28, UI_RED);
-    else
-        DrawAVLNode(tree.root, 600, 325, 230, 0);
+    Rectangle canvas = {30, 265, 890, 380};
+    UICard(canvas, "TREE VIEW", C_PURPLE);
+    DrawText(TextFormat("NODES  %d     HEIGHT  %d", tree.size, H(tree.root)), 700, 278, 14, C_PURPLE);
 
-    DrawText(TextFormat("Total Nodes: %d", tree.size),
-             50, 645, 18, UI_WHITE);
+    int count = 0;
+    Flatten(tree.root, &count);
+    TVDraw(&tv, nodes, count, canvas, 1);
 
-    DrawText(message, 280, 645, 16, UI_GREEN);
+    UIStatusBar(&st, (Rectangle){30, 655, 890, 80});
 }
